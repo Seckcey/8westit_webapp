@@ -68,7 +68,7 @@ namespace EightWest.Agent
                     wc.DownloadFile(_installerUrl, tmp);
 
                 Log.Info("Running RustDesk silent install...");
-                Run(tmp, "--silent-install", 180000);
+                RunNoCapture(tmp, "--silent-install", 180000);
                 System.Threading.Thread.Sleep(5000); // give the installer time to register the service
 
                 if (IsInstalled) { Log.Info("RustDesk installed."); return true; }
@@ -128,7 +128,7 @@ namespace EightWest.Agent
             var exe = ExePath;
             if (exe == null) return existing ?? "";
             var pw = string.IsNullOrEmpty(existing) ? GeneratePassword() : existing;
-            try { Run(exe, "--password " + pw, 8000); }
+            try { RunNoCapture(exe, "--password " + pw, 8000); }
             catch (Exception ex) { Log.Warn("Set RustDesk password failed: " + ex.Message); }
             return pw;
         }
@@ -146,6 +146,7 @@ namespace EightWest.Agent
             catch (Exception ex) { Log.Warn("GetId failed: " + ex.Message); return ""; }
         }
 
+        /// <summary>Run and capture stdout. Use only for short commands that exit cleanly (e.g. --get-id).</summary>
         private static string Run(string exe, string args, int timeoutMs)
         {
             var psi = new ProcessStartInfo(exe, args)
@@ -157,9 +158,30 @@ namespace EightWest.Agent
             };
             using (var p = Process.Start(psi))
             {
-                var so = p.StandardOutput.ReadToEnd();
+                var sb = new StringBuilder();
+                p.OutputDataReceived += (s, e) => { if (e.Data != null) sb.AppendLine(e.Data); };
+                p.BeginOutputReadLine();
                 p.WaitForExit(timeoutMs);
-                return so;
+                try { p.CancelOutputRead(); } catch { }
+                return sb.ToString();
+            }
+        }
+
+        /// <summary>
+        /// Run without redirecting stdout/stderr. REQUIRED for the RustDesk installer:
+        /// --silent-install spawns the RustDesk service which inherits the parent's stdout
+        /// handle, so a captured ReadToEnd() would block until the service exits (i.e. forever).
+        /// </summary>
+        private static void RunNoCapture(string exe, string args, int timeoutMs)
+        {
+            var psi = new ProcessStartInfo(exe, args)
+            {
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            };
+            using (var p = Process.Start(psi))
+            {
+                p.WaitForExit(timeoutMs);
             }
         }
 
