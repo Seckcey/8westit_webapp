@@ -1,22 +1,17 @@
-# 8 West IT RMM portal — web root hardening
-Options -Indexes
+# 8 West IT RMM portal — web root
+#
+# Kept intentionally minimal: some shared hosts (e.g. HostGator) return a 500
+# if .htaccess uses directives their AllowOverride doesn't permit (Options,
+# Header, etc.). The only directive the app actually needs is the Authorization
+# passthrough below, so the agent's "Bearer <token>" header reaches PHP.
+#
+# If your host allows more, you may re-add hardening such as:
+#   Options -Indexes
+#   Header always set X-Content-Type-Options "nosniff"
+# Test after adding each — if you get a 500, that directive isn't permitted.
 
-<IfModule mod_headers.c>
-  Header always set X-Content-Type-Options "nosniff"
-  Header always set X-Frame-Options "SAMEORIGIN"
-  Header always set Referrer-Policy "strict-origin-when-cross-origin"
-</IfModule>
-
-# Make sure the Authorization header reaches PHP (needed for agent Bearer tokens).
 <IfModule mod_rewrite.c>
   RewriteEngine On
   RewriteCond %{HTTP:Authorization} .
   RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
 </IfModule>
-SetEnvIf Authorization "(.*)" HTTP_AUTHORIZATION=$1
-
-# Block dotfiles
-<FilesMatch "^\.">
-  <IfModule mod_authz_core.c>Require all denied</IfModule>
-  <IfModule !mod_authz_core.c>Deny from all</IfModule>
-</FilesMatch>
