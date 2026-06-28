@@ -1,0 +1,22 @@
+# 8 West IT RMM portal — web root hardening
+Options -Indexes
+
+<IfModule mod_headers.c>
+  Header always set X-Content-Type-Options "nosniff"
+  Header always set X-Frame-Options "SAMEORIGIN"
+  Header always set Referrer-Policy "strict-origin-when-cross-origin"
+</IfModule>
+
+# Make sure the Authorization header reaches PHP (needed for agent Bearer tokens).
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteCond %{HTTP:Authorization} .
+  RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+</IfModule>
+SetEnvIf Authorization "(.*)" HTTP_AUTHORIZATION=$1
+
+# Block dotfiles
+<FilesMatch "^\.">
+  <IfModule mod_authz_core.c>Require all denied</IfModule>
+  <IfModule !mod_authz_core.c>Deny from all</IfModule>
+</FilesMatch>

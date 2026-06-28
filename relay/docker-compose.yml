@@ -1,0 +1,28 @@
+# 8 West IT — self-hosted RustDesk relay (hbbs + hbbr)
+# Run this on a small Linux VPS (1 vCPU / 1 GB RAM is plenty for <50 endpoints).
+#
+#   1) Install Docker + the compose plugin.
+#   2) Put this file in /opt/rustdesk/ and run:  docker compose up -d
+#   3) Open firewall TCP 21115-21119 and UDP 21116 to the internet.
+#   4) Read ./data/id_ed25519.pub  -> paste that string into the portal config as rustdesk.relay_key
+#
+# hbbs = ID/rendezvous server, hbbr = relay server.
+
+services:
+  hbbs:
+    image: rustdesk/rustdesk-server:latest
+    container_name: hbbs
+    command: hbbs -r ${RELAY_HOST}:21117
+    network_mode: host
+    volumes:
+      - ./data:/root
+    restart: unless-stopped
+
+  hbbr:
+    image: rustdesk/rustdesk-server:latest
+    container_name: hbbr
+    command: hbbr
+    network_mode: host
+    volumes:
+      - ./data:/root
+    restart: unless-stopped

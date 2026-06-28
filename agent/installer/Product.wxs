@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  8 West IT RMM Agent — WiX v5 installer.
+
+  Builds an MSI that:
+    * installs EightWestAgent.exe to "Program Files\8 West IT\Agent"
+    * writes PortalUrl + EnrollKey to HKLM\SOFTWARE\8WestIT\Agent
+    * registers + starts the "EightWestAgent" Windows service (LocalSystem, auto-start)
+
+  Build (handled by build-agent.ps1):
+    wix build Product.wxs -ext WixToolset.Util.wixext -b "<bin dir>" -o EightWestAgent.msi
+
+  Install on a client (key + portal supplied here or baked in by build-agent.ps1):
+    msiexec /i EightWestAgent.msi ENROLLKEY=<64-hex-key> PORTAL=https://support.8westit.com /qn
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
+
+  <Package Name="8 West IT RMM Agent"
+           Manufacturer="8 West IT, LLC"
+           Version="1.0.0.0"
+           UpgradeCode="7B3F2A14-9C6E-4D2B-AE51-8F0C2D6A1E90"
+           Compressed="yes"
+           Scope="perMachine">
+
+    <MajorUpgrade DowngradeErrorMessage="A newer version of the 8 West IT Agent is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <!-- Supplied on the msiexec command line (or baked in by the build script). -->
+    <Property Id="ENROLLKEY" Secure="yes" />
+    <Property Id="PORTAL" Secure="yes" Value="https://support.8westit.com" />
+
+    <Feature Id="MainFeature" Title="Agent">
+      <ComponentGroupRef Id="AgentComponents" />
+    </Feature>
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="CompanyDir" Name="8 West IT">
+        <Directory Id="INSTALLFOLDER" Name="Agent" />
+      </Directory>
+    </StandardDirectory>
+
+    <ComponentGroup Id="AgentComponents" Directory="INSTALLFOLDER">
+
+      <!-- Service executable (resolved from the bind path passed via -b). -->
+      <Component Id="cmpAgentExe" Bitness="always64">
+        <File Id="EightWestAgentExe" Source="EightWestAgent.exe" KeyPath="yes" />
+
+        <ServiceInstall Id="svcInstall"
+                        Name="EightWestAgent"
+                        DisplayName="8 West IT RMM Agent"
+                        Description="Reports status and enables remote support for 8 West IT, LLC."
+                        Type="ownProcess"
+                        Start="auto"
+                        Account="LocalSystem"
+                        ErrorControl="normal"
+                        Vital="yes">
+          <!-- Auto-restart the service on failure. -->
+          <util:ServiceConfig FirstFailureActionType="restart"
+                              SecondFailureActionType="restart"
+                              ThirdFailureActionType="restart"
+                              RestartServiceDelayInSeconds="60" />
+        </ServiceInstall>
+        <ServiceControl Id="svcControl"
+                        Name="EightWestAgent"
+                        Start="install"
+                        Stop="both"
+                        Remove="uninstall"
+                        Wait="yes" />
+      </Component>
+
+      <!-- Config the service reads at startup. -->
+      <Component Id="cmpRegConfig" Bitness="always64">
+        <RegistryKey Root="HKLM" Key="SOFTWARE\8WestIT\Agent">
+          <RegistryValue Type="string" Name="PortalUrl" Value="[PORTAL]" KeyPath="yes" />
+          <RegistryValue Type="string" Name="EnrollKey" Value="[ENROLLKEY]" />
+        </RegistryKey>
+      </Component>
+
+    </ComponentGroup>
+  </Package>
+</Wix>

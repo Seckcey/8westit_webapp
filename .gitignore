@@ -1,0 +1,21 @@
+# Secrets / local config
+portal/config/config.php
+
+# .NET build output
+agent/**/bin/
+agent/**/obj/
+*.user
+
+# WiX / MSI output
+agent/installer/*.msi
+agent/installer/*.wixobj
+agent/installer/*.wixpdb
+agent/dist/
+
+# Logs / scratch
+*.log
+.DS_Store
+Thumbs.db
+
+# Local upload archives
+*.zip
