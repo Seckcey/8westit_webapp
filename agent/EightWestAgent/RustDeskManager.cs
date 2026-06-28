@@ -57,20 +57,38 @@ namespace EightWest.Agent
         public bool EnsureInstalled()
         {
             if (IsInstalled) return true;
-            if (string.IsNullOrEmpty(_installerUrl)) return false;
 
+            // 1) Prefer the installer bundled in the MSI (sits next to the agent exe).
+            //    Self-contained — works even on networks that block GitHub.
+            var bundled = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "rustdesk-setup.exe");
+            if (File.Exists(bundled) && RunInstaller(bundled, deleteAfter: false))
+                return true;
+
+            // 2) Fall back to downloading the pinned version.
+            if (string.IsNullOrEmpty(_installerUrl)) return false;
             var tmp = Path.Combine(Path.GetTempPath(), "rustdesk-setup.exe");
             try
             {
                 ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12 | SecurityProtocolType.Tls11;
-                Log.Info("RustDesk not present — downloading installer: " + _installerUrl);
+                Log.Info("Downloading RustDesk installer: " + _installerUrl);
                 using (var wc = new WebClient())
                     wc.DownloadFile(_installerUrl, tmp);
+                return RunInstaller(tmp, deleteAfter: true);
+            }
+            catch (Exception ex)
+            {
+                Log.Warn("RustDesk download/install failed: " + ex.Message);
+                return false;
+            }
+        }
 
-                Log.Info("Running RustDesk silent install...");
-                RunNoCapture(tmp, "--silent-install", 180000);
+        private bool RunInstaller(string installerPath, bool deleteAfter)
+        {
+            try
+            {
+                Log.Info("Installing RustDesk (" + Path.GetFileName(installerPath) + ")...");
+                RunNoCapture(installerPath, "--silent-install", 180000);
                 System.Threading.Thread.Sleep(5000); // give the installer time to register the service
-
                 if (IsInstalled) { Log.Info("RustDesk installed."); return true; }
                 Log.Warn("RustDesk installer ran but rustdesk.exe was not found yet.");
                 return false;
@@ -82,7 +100,7 @@ namespace EightWest.Agent
             }
             finally
             {
-                try { if (File.Exists(tmp)) File.Delete(tmp); } catch { }
+                if (deleteAfter) { try { if (File.Exists(installerPath)) File.Delete(installerPath); } catch { } }
             }
         }
 

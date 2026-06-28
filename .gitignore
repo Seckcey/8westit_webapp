@@ -19,3 +19,6 @@ Thumbs.db
 
 # Local upload archives
 *.zip
+
+# Bundled RustDesk client (downloaded at build time, ~24 MB)
+agent/installer/rustdesk-*.exe

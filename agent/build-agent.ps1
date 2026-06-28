@@ -2,11 +2,10 @@
   build-agent.ps1 — compiles the 8 West IT RMM Agent and packages the MSI.
 
   Prerequisites (install once on this Windows machine):
-    1) .NET SDK 8   -> winget install Microsoft.DotNet.SDK.8
-    2) WiX Toolset 5 (free; v6/v7 require a paid EULA):
-         dotnet tool install --global wix --version 5.0.2
-         wix extension add -g WixToolset.Util.wixext/5.0.2
-       Ensure %USERPROFILE%\.dotnet\tools is on PATH (open a new terminal after install).
+    Just run  setup-build-tools.bat  once — it installs .NET SDK 8 + WiX 5 for you.
+    (Manual equivalent: winget install Microsoft.DotNet.SDK.8 ;
+     dotnet tool install --global wix --version 5.0.2 ;
+     wix extension add -g WixToolset.Util.wixext/5.0.2)
 
   Usage:
     ./build-agent.ps1                                  # builds dist\EightWestAgent.msi
@@ -17,7 +16,9 @@
 param(
   [string]$EnrollKey = "",
   [string]$PortalUrl = "https://support.8westit.com",
-  [string]$Configuration = "Release"
+  [string]$Configuration = "Release",
+  # RustDesk client bundled into the MSI (downloaded once, then cached).
+  [string]$RustDeskUrl = "https://github.com/rustdesk/rustdesk/releases/download/1.4.8/rustdesk-1.4.8-x86_64.exe"
 )
 
 $ErrorActionPreference = "Stop"
@@ -48,11 +49,20 @@ if (-not (Test-Path (Join-Path $binDir "EightWestAgent.exe"))) {
 
 New-Item -ItemType Directory -Force -Path $distDir | Out-Null
 
+# Bundle the RustDesk client so every install is self-contained (cached after first download).
+$rdLocal = Join-Path $root "installer\rustdesk-setup.exe"
+if (-not (Test-Path $rdLocal)) {
+  Write-Host "==> Downloading RustDesk client to bundle (one-time, ~24 MB)" -ForegroundColor Cyan
+  $ProgressPreference = "SilentlyContinue"
+  Invoke-WebRequest $RustDeskUrl -OutFile $rdLocal
+}
+Write-Host "==> Bundling RustDesk: $([math]::Round((Get-Item $rdLocal).Length/1MB,1)) MB" -ForegroundColor Gray
+
 Write-Host "==> Packaging MSI" -ForegroundColor Cyan
 $msi = Join-Path $distDir "EightWestAgent.msi"
 
-# wix build: -b adds the bind path so <File Source="EightWestAgent.exe"> resolves.
-wix build $wxs -ext WixToolset.Util.wixext -b "$binDir" -o $msi
+# wix build: -b adds bind paths so <File Source="..."> resolves (agent exe + bundled installer).
+wix build $wxs -ext WixToolset.Util.wixext -b "$binDir" -b "$root\installer" -o $msi
 
 Write-Host "==> Built: $msi" -ForegroundColor Green
 

@@ -156,16 +156,19 @@ In the portal: **Agents & Keys → Generate** (optionally tie it to a client).
 Copy the 64-character key.
 
 ### 4.2 Build the installer (on this Windows PC)
+Easiest: **double-click `agent\make-installer.bat`**, paste the key when prompted.
+Or from PowerShell:
 ```powershell
 cd "<repo>\agent"
 ./build-agent.ps1 -EnrollKey <paste-the-key> -PortalUrl https://support.8westit.com
 ```
 This produces:
-- `agent/dist/EightWestAgent.msi` — the installer
+- `agent/dist/EightWestAgent.msi` — the installer (~24 MB; RustDesk is bundled inside)
 - `agent/dist/install.bat` — a one-click silent installer with your key baked in
 
-> Prereqs (already installed here): .NET SDK 8 and WiX 5
-> (`dotnet tool install --global wix --version 5.0.2` + `wix extension add -g WixToolset.Util.wixext/5.0.2`).
+> First-time setup on a NEW machine: run **`agent\setup-build-tools.bat`** once — it installs
+> .NET SDK 8 + WiX 5 for you. (Already installed on this PC.) The first build also downloads
+> the RustDesk client (~24 MB) once and caches it in `agent/installer/` for bundling.
 
 ### 4.3 Install on a client computer
 Copy **EightWestAgent.msi** and **install.bat** to the client, then run **install.bat as
@@ -176,13 +179,13 @@ msiexec /i EightWestAgent.msi ENROLLKEY=<key> PORTAL=https://support.8westit.com
 What happens automatically:
 1. Installs the **8 West IT RMM Agent** Windows service (runs as SYSTEM, auto-start).
 2. Within ~1 min the computer appears on your **Dashboard** (online, with inventory).
-3. In the background the agent **downloads and silently installs RustDesk**, points it at
-   your relay, and sets an unattended password. Within a few minutes the **Remote In**
+3. The agent **silently installs the bundled RustDesk** (included in the MSI), points it at
+   your relay, and sets an unattended password. Within a minute or two the **Remote In**
    button activates for that computer.
 
-> The client needs outbound internet (it already does — it talks to your portal). RustDesk
-> is fetched from GitHub the first time. To pin a different RustDesk version, set
-> `HKLM\SOFTWARE\8WestIT\Agent\RustDeskUrl` or add `RustDeskUrl` to the agent config.
+> RustDesk ships *inside* the MSI, so no GitHub download is needed on the client — it works
+> even on locked-down networks. (If the bundled copy is ever missing, the agent falls back to
+> downloading the version in `HKLM\SOFTWARE\8WestIT\Agent\RustDeskUrl`.)
 
 ---
 
