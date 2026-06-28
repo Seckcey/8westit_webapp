@@ -21,6 +21,8 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+# Make the WiX global tool findable even from a fresh shell / double-click.
+if (Test-Path "$env:USERPROFILE\.dotnet\tools") { $env:Path += ";$env:USERPROFILE\.dotnet\tools" }
 $root    = Split-Path -Parent $MyInvocation.MyCommand.Path
 $proj    = Join-Path $root "EightWestAgent\EightWestAgent.csproj"
 $wxs     = Join-Path $root "installer\Product.wxs"
