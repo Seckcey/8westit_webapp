@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Milepost — style preview</title>
+<script>(function(){try{var t=localStorage.getItem('mp-theme')||'system';document.documentElement.setAttribute('data-theme',t);}catch(e){document.documentElement.setAttribute('data-theme','system');}})();</script>
 <link rel="stylesheet" href="assets/css/app.css">
 <style>/* preview-only: not part of the app */ body{padding-bottom:60px}</style>
 </head>
@@ -17,6 +18,11 @@
   </a>
   <nav class="topnav">
     <a href="#">Dashboard</a><a href="#">Clients</a><a href="#">Deploy&nbsp;Agent</a><a href="#">Users</a>
+    <div class="theme-toggle" role="group" aria-label="Appearance">
+      <button type="button" data-theme-set="light" title="Light">&#9728;</button>
+      <button type="button" data-theme-set="dark" title="Dark">&#9789;</button>
+      <button type="button" data-theme-set="system" title="System">&#9680;</button>
+    </div>
     <a class="who" href="#">Frank</a><a class="btn-ghost" href="#">Sign out</a>
   </nav>
 </header>
@@ -80,6 +86,8 @@
   </div>
 
   <div class="alert alert-ok">Deployment created. Share the link or QR below.</div>
+  <div class="alert">Heads up: this is a sample alert in the new theme.</div>
 </main>
+<script src="assets/js/app.js"></script>
 </body>
 </html>

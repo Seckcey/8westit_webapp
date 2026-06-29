@@ -33,6 +33,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
 <title>Setup · Milepost</title>
 <link rel="icon" href="assets/img/favicon.ico" sizes="any">
 <link rel="apple-touch-icon" href="assets/img/apple-touch-icon.png">
+<script>(function(){try{var t=localStorage.getItem('mp-theme')||'system';document.documentElement.setAttribute('data-theme',t);}catch(e){document.documentElement.setAttribute('data-theme','system');}})();</script>
 <link rel="stylesheet" href="assets/css/app.css"></head>
 <body class="login-body">
 <div class="login-card">

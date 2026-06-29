@@ -2,6 +2,30 @@
 (function () {
   'use strict';
 
+  // Appearance: light / dark / system (persisted in localStorage as 'mp-theme').
+  var root = document.documentElement;
+  function curTheme() { try { return localStorage.getItem('mp-theme') || 'system'; } catch (e) { return 'system'; } }
+  function applyTheme(t) {
+    root.setAttribute('data-theme', t);
+    var btns = document.querySelectorAll('[data-theme-set]');
+    for (var i = 0; i < btns.length; i++) {
+      btns[i].classList.toggle('active', btns[i].getAttribute('data-theme-set') === t);
+    }
+  }
+  applyTheme(curTheme());
+  document.addEventListener('click', function (ev) {
+    var b = ev.target.closest('[data-theme-set]');
+    if (!b) return;
+    var t = b.getAttribute('data-theme-set');
+    try { localStorage.setItem('mp-theme', t); } catch (e) {}
+    applyTheme(t);
+  });
+  if (window.matchMedia) {
+    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function () {
+      if (curTheme() === 'system') applyTheme('system'); // re-evaluate the media query
+    });
+  }
+
   // Copy-to-clipboard buttons.
   document.addEventListener('click', function (ev) {
     var btn = ev.target.closest('[data-copy]');

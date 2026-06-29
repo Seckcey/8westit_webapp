@@ -33,6 +33,7 @@ function layout_header(string $title, ?array $user): void
 <title><?= e($title) ?> · Milepost</title>
 <link rel="icon" href="assets/img/favicon.ico" sizes="any">
 <link rel="apple-touch-icon" href="assets/img/apple-touch-icon.png">
+<script>(function(){try{var t=localStorage.getItem('mp-theme')||'system';document.documentElement.setAttribute('data-theme',t);}catch(e){document.documentElement.setAttribute('data-theme','system');}})();</script>
 <link rel="stylesheet" href="assets/css/app.css">
 </head>
 <body>
@@ -52,6 +53,11 @@ function layout_header(string $title, ?array $user): void
     <?php if ($u && ($u['role'] ?? '') === 'admin'): ?>
       <a href="users.php">Users</a>
     <?php endif; ?>
+    <div class="theme-toggle" role="group" aria-label="Appearance">
+      <button type="button" data-theme-set="light" title="Light" aria-label="Light mode">&#9728;</button>
+      <button type="button" data-theme-set="dark" title="Dark" aria-label="Dark mode">&#9789;</button>
+      <button type="button" data-theme-set="system" title="System" aria-label="Match system">&#9680;</button>
+    </div>
     <?php if ($u): ?>
       <a class="who" href="account.php" title="My account"><?= e($u['full_name'] ?: $u['username']) ?></a>
       <a class="btn-ghost" href="logout.php">Sign out</a>
