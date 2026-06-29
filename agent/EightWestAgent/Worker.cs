@@ -14,7 +14,7 @@ namespace EightWest.Agent
     /// </summary>
     public class Worker
     {
-        public const string Version = "1.0.3";
+        public const string Version = "1.1.0";
 
         private readonly ManualResetEvent _stop = new ManualResetEvent(false);
         private Thread _thread;
@@ -29,6 +29,12 @@ namespace EightWest.Agent
         private bool _rustConfigured = false;
         private DateTime _lastRustAttempt = DateTime.MinValue;
 
+        // --- Milepost real-time (Phase 1) ---
+        private RealtimeClient _rt;
+        // The wss URL the portal advertised (enroll/heartbeat "realtime_url"); a
+        // RealtimeUrl registry/json override takes precedence over this.
+        private string _advertisedRtUrl = "";
+
         public void Start()
         {
             _thread = new Thread(Run) { IsBackground = true, Name = "EightWestAgentWorker" };
@@ -38,6 +44,7 @@ namespace EightWest.Agent
         public void Stop()
         {
             _stop.Set();
+            try { _rt?.Stop(); } catch { }
             _thread?.Join(TimeSpan.FromSeconds(10));
         }
 
@@ -62,6 +69,7 @@ namespace EightWest.Agent
                     if (!Enroll()) { ScheduleRetry(); return; }
                 }
 
+                StartRealtime();
                 MainLoop();
             }
             catch (Exception ex)
@@ -75,8 +83,111 @@ namespace EightWest.Agent
         {
             while (!_stop.WaitOne(TimeSpan.FromMinutes(2)))
             {
-                if (Enroll()) { MainLoop(); return; }
+                if (Enroll()) { StartRealtime(); MainLoop(); return; }
             }
+        }
+
+        /// <summary>
+        /// Start the real-time client once, after enrollment. It runs on its own
+        /// background thread alongside MainLoop (which keeps polling as the always-on
+        /// fallback, constraint 3). A RealtimeUrl override or the portal-advertised
+        /// URL is required; with neither, the agent stays pure-polling.
+        /// </summary>
+        private void StartRealtime()
+        {
+            if (_rt != null) return;                       // start once
+            if (!_cfg.RealtimeEnabledFlag)
+            {
+                Log.Info("Realtime disabled by config (RealtimeEnabled=0); polling only.");
+                return;
+            }
+            var url = ResolveRtUrl();
+            if (string.IsNullOrEmpty(url))
+            {
+                Log.Info("Realtime URL not configured/advertised yet; polling only.");
+                return;
+            }
+            try
+            {
+                _rt = new RealtimeClient(
+                    url,
+                    () => _state.AuthToken,
+                    JobRunner.Execute,
+                    new MetricsCollector(),
+                    _state,
+                    _api,
+                    () => _rust != null && _rust.IsInstalled ? _rust.GetId() : "");
+                _rt.Start();
+            }
+            catch (Exception ex)
+            {
+                Log.Warn("Realtime start failed (polling continues): " + ex.Message);
+                _rt = null;
+            }
+        }
+
+        /// <summary>RealtimeUrl override (registry/json) wins; else the portal-advertised URL.</summary>
+        private string ResolveRtUrl()
+        {
+            // A locally-configured override is trusted, but must still be wss:// so the
+            // bearer token never traverses plaintext.
+            if (!string.IsNullOrEmpty(_cfg.RealtimeUrl))
+                return ValidateRtUrl(_cfg.RealtimeUrl, requireSameDomain: false);
+            // The portal-advertised URL arrives over the wire, so it is less trusted:
+            // require wss:// AND that its host shares the portal's registrable domain, so a
+            // tampered/compromised response can't redirect the agent + token to an
+            // attacker-controlled endpoint.
+            return ValidateRtUrl(_advertisedRtUrl ?? "", requireSameDomain: true);
+        }
+
+        /// <summary>
+        /// Returns the URL only if it is wss:// (and, when required, on the same
+        /// registrable domain as the portal); otherwise "" so RT stays off and polling
+        /// carries the load.
+        /// </summary>
+        private string ValidateRtUrl(string url, bool requireSameDomain)
+        {
+            if (string.IsNullOrEmpty(url)) return "";
+            Uri u;
+            try { u = new Uri(url); }
+            catch { Log.Warn("Realtime: ignoring malformed URL: " + url); return ""; }
+
+            if (!string.Equals(u.Scheme, "wss", StringComparison.OrdinalIgnoreCase))
+            {
+                Log.Warn("Realtime: ignoring non-wss URL (token must stay encrypted): " + url);
+                return "";
+            }
+            if (requireSameDomain)
+            {
+                var portalHost = TryHost(_cfg.PortalUrl);
+                if (portalHost.Length == 0 || !SameRegistrableDomain(u.Host, portalHost))
+                {
+                    Log.Warn($"Realtime: ignoring advertised host '{u.Host}' (not on portal domain '{portalHost}').");
+                    return "";
+                }
+            }
+            return url;
+        }
+
+        private static string TryHost(string url)
+        {
+            try { return new Uri(url).Host; } catch { return ""; }
+        }
+
+        // Registrable-domain heuristic (no public-suffix list): compare the last two DNS
+        // labels, so support.8westit.com and rt.8westit.com both reduce to 8westit.com.
+        private static bool SameRegistrableDomain(string a, string b)
+        {
+            var ra = LastTwoLabels(a);
+            var rb = LastTwoLabels(b);
+            return ra.Length > 0 && ra == rb;
+        }
+
+        private static string LastTwoLabels(string host)
+        {
+            var parts = (host ?? "").ToLowerInvariant().TrimEnd('.').Split('.');
+            if (parts.Length <= 2) return string.Join(".", parts);
+            return parts[parts.Length - 2] + "." + parts[parts.Length - 1];
         }
 
         private bool Enroll()
@@ -102,6 +213,15 @@ namespace EightWest.Agent
                 _state.Save();
                 _api.SetToken(_state.AuthToken);
                 _heartbeatSecs = (int)Num(resp, "heartbeat_secs", 60);
+
+                // Phase 1: the portal may advertise the real-time WS endpoint here
+                // (old agents simply ignore the key). A registry/json RealtimeUrl
+                // override, if set, wins over this in ResolveRtUrl().
+                var advertised = Str(resp, "realtime_url");
+                if (!string.IsNullOrEmpty(advertised)) _advertisedRtUrl = advertised;
+
+                // A fresh token was just minted — let any halted RT client reconnect.
+                _rt?.NotifyTokenRotated();
 
                 // Store the relay settings the portal handed us. The actual RustDesk
                 // download/install/config happens in the main loop so enrollment stays fast.
@@ -135,6 +255,15 @@ namespace EightWest.Agent
                 {
                     var pending = Heartbeat();
                     if (pending > 0) DrainJobs();
+
+                    // Real-time fallback maintenance: flush any results the WS path
+                    // couldn't durably deliver, via the existing REST endpoint
+                    // (idempotent by job_id). Safe whether WS is up or down.
+                    _rt?.DrainResultOutboxViaRest();
+
+                    // The portal may begin advertising the WS URL after enrollment
+                    // (migration step 4). If so, start RT now without re-enrolling.
+                    if (_rt == null) StartRealtime();
 
                     if ((DateTime.UtcNow - _lastInventory).TotalHours >= 6) SendInventory();
 
@@ -172,6 +301,13 @@ namespace EightWest.Agent
                 ["rustdesk_pass"] = _state.RustDeskPassword ?? "",
             };
             var resp = _api.Post("/api/heartbeat.php", body);
+
+            // Phase 1: the portal advertises the WS endpoint on heartbeat too, so an
+            // already-running agent can pick it up after a portal config flip without
+            // re-enrolling (old agents ignore the key).
+            var advertised = Str(resp, "realtime_url");
+            if (!string.IsNullOrEmpty(advertised)) _advertisedRtUrl = advertised;
+
             return (int)Num(resp, "pending_jobs", 0);
         }
 
@@ -187,9 +323,46 @@ namespace EightWest.Agent
                 var id = (int)Num(job, "id", 0);
                 var type = Str(job, "job_type");
                 var payload = Str(job, "payload");
+
+                // Idempotency guard: if the real-time path already claimed this job_id,
+                // never run it again here. This is what prevents the double-execution a
+                // mid-run WS disconnect + requeue would otherwise cause.
+                if (id != 0 && _state.HasSeenJob(id))
+                {
+                    var prior = _state.FindResult(id);
+                    if (prior != null)
+                    {
+                        // RT finished but its result hasn't been durably persisted yet —
+                        // re-report the real cached result (never a fabricated one).
+                        Log.Info($"Job {id} already ran via realtime; re-reporting cached result.");
+                        _api.Post("/api/jobs.php", new Dictionary<string, object>
+                        {
+                            ["job_id"] = id,
+                            ["status"] = prior.Status,
+                            ["exit_code"] = prior.ExitCode,
+                            ["output"] = prior.Output,
+                        });
+                        _state.RemoveResult(id);
+                    }
+                    else
+                    {
+                        // Claimed by RT and still in flight (or already delivered + acked):
+                        // the RT path owns delivery. Do NOT execute or fabricate a result.
+                        Log.Info($"Job {id} is owned by the realtime path; skipping poll execution.");
+                    }
+                    continue;
+                }
+
                 Log.Info($"Running job {id} ({type})");
 
-                var result = JobRunner.Execute(type, payload);
+                // Single-flight across BOTH paths (shared with RealtimeClient): a poll job
+                // and an RT-pushed job can never run concurrently on this machine.
+                JobResult result;
+                JobRunner.ExecGate.Wait();
+                try { result = JobRunner.Execute(type, payload); }
+                finally { JobRunner.ExecGate.Release(); }
+
+                if (id != 0) _state.MarkJobSeen(id);
                 _api.Post("/api/jobs.php", new Dictionary<string, object>
                 {
                     ["job_id"] = id,

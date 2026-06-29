@@ -17,6 +17,24 @@ namespace EightWest.Agent
         // Optional override for the RustDesk installer URL (blank = built-in pinned version).
         public string RustDeskUrl { get; set; } = "";
 
+        // --- Milepost real-time (Phase 1, PHASE1-SPEC §7.3) ---
+        // Optional override for the wss:// URL the portal advertises (enroll/heartbeat
+        // return "realtime_url"). Blank = use whatever the portal returns.
+        public string RealtimeUrl { get; set; } = "";
+        // "0" forces pure polling (kill switch). Default on. Stored as string to match
+        // the registry/json string convention; parsed via RealtimeEnabledFlag.
+        public string RealtimeEnabled { get; set; } = "1";
+
+        /// <summary>True unless RealtimeEnabled is explicitly "0"/"false"/"no"/"off".</summary>
+        public bool RealtimeEnabledFlag
+        {
+            get
+            {
+                var v = (RealtimeEnabled ?? "1").Trim().ToLowerInvariant();
+                return v != "0" && v != "false" && v != "no" && v != "off";
+            }
+        }
+
         private const string RegPath = @"SOFTWARE\8WestIT\Agent";
 
         public static Config Load()
@@ -34,6 +52,10 @@ namespace EightWest.Agent
                         cfg.PortalUrl = (key.GetValue("PortalUrl") as string) ?? cfg.PortalUrl;
                         cfg.EnrollKey = (key.GetValue("EnrollKey") as string) ?? cfg.EnrollKey;
                         cfg.RustDeskUrl = (key.GetValue("RustDeskUrl") as string) ?? cfg.RustDeskUrl;
+                        cfg.RealtimeUrl = (key.GetValue("RealtimeUrl") as string) ?? cfg.RealtimeUrl;
+                        // Only override the default if the value is actually present.
+                        var re = key.GetValue("RealtimeEnabled") as string;
+                        if (!string.IsNullOrEmpty(re)) cfg.RealtimeEnabled = re;
                     }
                 }
             }
@@ -50,11 +72,16 @@ namespace EightWest.Agent
                     if (string.IsNullOrEmpty(cfg.PortalUrl)) cfg.PortalUrl = fromFile.PortalUrl ?? "";
                     if (string.IsNullOrEmpty(cfg.EnrollKey)) cfg.EnrollKey = fromFile.EnrollKey ?? "";
                     if (string.IsNullOrEmpty(cfg.RustDeskUrl)) cfg.RustDeskUrl = fromFile.RustDeskUrl ?? "";
+                    if (string.IsNullOrEmpty(cfg.RealtimeUrl)) cfg.RealtimeUrl = fromFile.RealtimeUrl ?? "";
+                    // RealtimeEnabled: only take the file value when the registry didn't supply one.
+                    if (cfg.RealtimeEnabled == "1" && !string.IsNullOrEmpty(fromFile.RealtimeEnabled))
+                        cfg.RealtimeEnabled = fromFile.RealtimeEnabled;
                 }
             }
             catch { /* ignore */ }
 
             cfg.PortalUrl = (cfg.PortalUrl ?? "").TrimEnd('/');
+            cfg.RealtimeUrl = (cfg.RealtimeUrl ?? "").Trim();
             return cfg;
         }
     }

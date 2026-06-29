@@ -1,0 +1,22 @@
+{
+  "name": "milepost-rt-backend",
+  "version": "1.0.0",
+  "description": "Milepost real-time backend: WebSocket server for RMM agents (VPS), with portal REST integration over a shared service secret. The PHP portal stays the source of truth.",
+  "license": "MIT",
+  "private": true,
+  "main": "src/server.js",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "optionalDependencies": {
+    "better-sqlite3": "^11.3.0"
+  },
+  "devDependencies": {}
+}

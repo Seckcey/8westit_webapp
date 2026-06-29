@@ -1,6 +1,7 @@
 using System;
 using System.Diagnostics;
 using System.Text;
+using System.Threading;
 
 namespace EightWest.Agent
 {
@@ -14,6 +15,14 @@ namespace EightWest.Agent
     /// <summary>Executes a queued job on the local machine (runs as the service account = SYSTEM).</summary>
     public static class JobRunner
     {
+        /// <summary>
+        /// Process-wide single-flight gate. BOTH the real-time push path
+        /// (<see cref="RealtimeClient"/>) and the polling path (<c>Worker.DrainJobs</c>)
+        /// acquire this before running a job, so a SYSTEM shell from one path can never
+        /// overlap one from the other on the same machine (Phase 1 review hardening).
+        /// </summary>
+        public static readonly SemaphoreSlim ExecGate = new SemaphoreSlim(1, 1);
+
         public static JobResult Execute(string type, string payload)
         {
             switch ((type ?? "").ToLowerInvariant())

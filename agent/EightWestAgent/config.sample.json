@@ -1,5 +1,7 @@
 {
   "PortalUrl": "https://support.8westit.com",
   "EnrollKey": "PASTE_A_64_HEX_ENROLLMENT_KEY_FROM_THE_PORTAL",
-  "RustDeskUrl": ""
+  "RustDeskUrl": "",
+  "RealtimeUrl": "",
+  "RealtimeEnabled": "1"
 }

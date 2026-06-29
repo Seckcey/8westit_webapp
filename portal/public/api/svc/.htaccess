@@ -1,0 +1,10 @@
+# Milepost service endpoints (backend → portal). These are guarded by the shared service
+# secret + HMAC in require_service(); no special web-server rules are needed beyond normal
+# PHP handling. Explicitly grant access (some hosts inherit a deny from a parent .htaccess).
+<IfModule mod_authz_core.c>
+  Require all granted
+</IfModule>
+<IfModule !mod_authz_core.c>
+  Order allow,deny
+  Allow from all
+</IfModule>

@@ -8,6 +8,7 @@
  */
 declare(strict_types=1);
 require_once __DIR__ . '/../../lib/auth.php';
+require_once __DIR__ . '/../../lib/realtime.php';
 enforce_https();
 
 if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') json_err('POST required', 405);
@@ -35,4 +36,9 @@ $stmt = db()->prepare('SELECT COUNT(*) FROM jobs WHERE agent_id = ? AND status =
 $stmt->execute([$agent['id']]);
 $pending = (int)$stmt->fetchColumn();
 
-json_out(['ok' => true, 'pending_jobs' => $pending]);
+$resp = ['ok' => true, 'pending_jobs' => $pending];
+// Advertise the real-time WS endpoint so already-fielded agents can upgrade without an MSI
+// change. Old agents ignore this unknown key (spec §7.1).
+$ws = rt_agent_ws_url();
+if ($ws !== '') $resp['realtime_url'] = $ws;
+json_out($resp);

@@ -10,6 +10,7 @@
  */
 declare(strict_types=1);
 require_once __DIR__ . '/../../lib/auth.php';
+require_once __DIR__ . '/../../lib/realtime.php';
 enforce_https();
 
 if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') json_err('POST required', 405);
@@ -84,7 +85,7 @@ if ($existing) {
 audit(null, $agentId, 'enroll', 'host=' . $hostname);
 
 $rd = cfg('rustdesk', []);
-json_out([
+$resp = [
     'ok' => true,
     'token' => $token,
     'heartbeat_secs' => 60,
@@ -92,4 +93,9 @@ json_out([
         'relay_host' => $rd['relay_host'] ?? '',
         'relay_key'  => $rd['relay_key'] ?? '',
     ],
-]);
+];
+// Advertise the real-time WS endpoint so agents learn it without an MSI change.
+// Old agents ignore this unknown key (spec §7.1).
+$ws = rt_agent_ws_url();
+if ($ws !== '') $resp['realtime_url'] = $ws;
+json_out($resp);

@@ -1,0 +1,9 @@
+rt.8westit.com {
+    encode zstd gzip
+    # Target the compose SERVICE NAME, not 127.0.0.1: Caddy runs in its own container,
+    # so 127.0.0.1 here would be Caddy's loopback, not the backend. Docker's embedded
+    # DNS resolves `milepost-rt` to the backend container on the shared network.
+    reverse_proxy milepost-rt:8090     # Caddy forwards Upgrade/Connection headers automatically
+    # /agent (WS), /internal/* and /healthz all proxy to the same backend; the shared
+    # secret guards /internal/*. Optionally restrict /internal to HostGator egress IPs.
+}

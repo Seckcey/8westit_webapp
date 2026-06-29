@@ -23,6 +23,39 @@ computers and remote into them for support. *Every endpoint, every mile.*
 | **`portal/`** | HostGator (PHP 7.4+/8.x + MySQL) | Dashboard: online/offline, inventory, run commands, launch remote sessions |
 | **`agent/`** | Client PCs (.NET 4.8 Windows Service, MSI) | Checks in, reports inventory, runs your commands, manages RustDesk |
 | **`relay/`** | A small Linux VPS | Relays the actual remote-desktop sessions (the one thing HostGator can't host) |
+| **`realtime/`** | The same Linux VPS | *(optional)* Real-time backend — live presence/metrics + instant commands over WebSocket |
+
+---
+
+## Real-time backend (optional, additive)
+
+By default the agent **polls** the portal every ~60 s over HTTPS — that's the always-on floor
+and it never goes away. The optional **`realtime/`** backend adds a WebSocket channel for live
+presence, live CPU/RAM/disk metrics, and instant "Run now" command delivery — with **automatic
+fallback to polling** whenever the backend or a socket is unavailable.
+
+```
+  .NET Agent ──HTTPS poll (unchanged)──►  PHP Portal + MySQL  ◄──HTTPS service secret──┐
+       ╚═══════════ WSS (new) ═══════════►  Milepost RT Backend (Node + ws, on the VPS)┘
+```
+
+Key design points (full contract in [`realtime/PHASE1-SPEC.md`](realtime/PHASE1-SPEC.md), wire
+protocol in [`realtime/PROTOCOL.md`](realtime/PROTOCOL.md)):
+
+- **The portal + MySQL stay the single source of truth.** The backend has **no DB driver** —
+  HostGator's MySQL isn't reachable from the VPS — so it persists results and presence by
+  calling the portal's `/api/svc/*` HTTPS API with a shared secret, and keeps live data in its
+  own in-memory store.
+- **Reuses the existing agent bearer token** for WS auth (no re-enrollment); the backend asks
+  the portal to verify it.
+- **Fewer DB writes than polling**, not more — live metrics stay in backend memory; only a
+  batched, throttled snapshot reaches MySQL.
+- **Purely additive & reversible** — flip one portal config flag (or stop the container) and
+  every machine falls back to exactly today's 60 s polling behavior.
+
+It also lays groundwork the roadmap depends on: a `Client → Site → Group → Device` policy /
+inheritance model, and a governed "tool action" concept (approval-gated actions for future
+AI/automation). Deploy it with **[DEPLOYMENT.md](DEPLOYMENT.md) → Part 6**.
 
 ---
 
@@ -90,5 +123,10 @@ web_app/
 │  ├─ EightWestAgent/   C# source
 │  ├─ installer/        Product.wxs
 │  └─ build-agent.ps1
-└─ relay/          RustDesk self-host (docker-compose + guide)
+├─ relay/          RustDesk self-host (docker-compose + guide)
+└─ realtime/       (optional) real-time backend — live presence/metrics + instant commands
+   ├─ PHASE1-SPEC.md   full contract
+   ├─ PROTOCOL.md      WebSocket wire protocol + service auth
+   ├─ backend/         Node + ws server (runs on the VPS, ws://127.0.0.1:8090)
+   └─ deploy/          Caddyfile + docker-compose snippet (TLS at rt.8westit.com)
 ```

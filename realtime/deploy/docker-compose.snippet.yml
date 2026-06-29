@@ -1,0 +1,38 @@
+# Merge these services into the existing RustDesk relay docker-compose.yml
+# (beside hbbs/hbbr). Paths are relative to realtime/deploy/.
+#
+# NETWORKING NOTE — read before changing ports/BIND:
+#   "localhost only" for the backend is enforced by Docker networking + the host
+#   firewall (ufw), NOT by BIND inside the container. The backend MUST bind 0.0.0.0
+#   *inside its own container* (see the BIND override below) so that Caddy — which
+#   runs in a SEPARATE container with its own loopback — can reach it across the
+#   shared `milepost` bridge network. We publish NO host port for milepost-rt, so
+#   nothing on the VPS's public interface can hit 8090; only Caddy can, and Caddy
+#   terminates TLS and is the sole public entry point (80/443).
+services:
+  milepost-rt:
+    build: ../backend
+    restart: unless-stopped
+    env_file: ../backend/.env
+    environment:
+      # Override .env's 127.0.0.1: inside the container we must listen on all
+      # interfaces so the Caddy container can reach us over the `milepost` network.
+      # This is NOT publicly exposed — no `ports:` mapping is published to the host.
+      - BIND=0.0.0.0
+    expose:
+      - "8090"                # reachable by other compose services (Caddy) only; never the host/public
+    networks: [milepost]
+    volumes: ["../backend/data:/app/data"]
+    read_only: true
+    tmpfs: ["/tmp"]
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports: ["80:80", "443:443"]
+    networks: [milepost]
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+networks: { milepost: {} }
+volumes: { caddy_data: {}, caddy_config: {} }

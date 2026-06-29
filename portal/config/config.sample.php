@@ -37,4 +37,18 @@ return [
         'relay_host' => 'relay.8westit.com', // VPS hostname or IP running hbbs/hbbr
         'relay_key'  => 'PASTE_RUSTDESK_PUBLIC_KEY', // contents of id_ed25519.pub from the VPS
     ],
+
+    // --- Milepost real-time backend integration (Phase 1) ---
+    // Shared secret used to authenticate the VPS real-time backend <-> this portal.
+    // MUST be byte-identical to the backend's MILEPOST_SERVICE_SECRET. Generate with:
+    //   openssl rand -hex 32
+    'service_secret'        => 'CHANGE_ME_64_HEX',
+    'service_replay_window' => 300,                    // seconds; ±skew allowed on service calls
+
+    'realtime' => [
+        'enabled'      => true,
+        'backend_url'  => 'https://rt.8westit.com',    // portal -> backend /internal/* base
+        'agent_ws_url' => 'wss://rt.8westit.com/agent', // advertised to agents via enroll/heartbeat
+        'dispatch_timeout_ms' => 4000,                 // portal HTTP timeout to the backend
+    ],
 ];

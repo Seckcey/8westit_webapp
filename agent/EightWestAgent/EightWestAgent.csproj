@@ -11,7 +11,7 @@
     <LangVersion>latest</LangVersion>
     <AssemblyName>EightWestAgent</AssemblyName>
     <RootNamespace>EightWest.Agent</RootNamespace>
-    <Version>1.0.3</Version>
+    <Version>1.1.0</Version>
     <Company>8 West IT, LLC</Company>
     <Product>Milepost Agent</Product>
     <UseWindowsForms>false</UseWindowsForms>
@@ -22,6 +22,9 @@
     <Reference Include="System.Management" />
     <Reference Include="System.Configuration.Install" />
     <Reference Include="System.Web.Extensions" />
+    <!-- ClientWebSocket (System.Net.WebSockets.ClientWebSocket) — built into .NET 4.8, no NuGet. -->
+    <Reference Include="System.Net.WebSockets.Client" />
+    <Reference Include="System.Net.WebSockets" />
   </ItemGroup>
 
   <!--

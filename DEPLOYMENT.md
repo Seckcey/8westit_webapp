@@ -30,6 +30,7 @@ In your DNS manager for **8westit.com**, create:
 |------|------|-------|---------|
 | A | `support` | (HostGator server IP) | the portal — support.8westit.com |
 | A | `relay`   | (your VPS IP)          | the remote relay — relay.8westit.com |
+| A | `rt`      | (your VPS IP — same box as `relay`) | the real-time backend — rt.8westit.com (optional; see Part 6) |
 
 > HostGator's server IP is in cPanel → *Server Information* → "Shared IP Address".
 > The VPS IP is shown when you create the droplet in Part 2.
@@ -199,6 +200,160 @@ then point it at your relay: **Settings → Network → ID/Relay Server**:
 
 Now, from the portal, click **Remote In** on any online computer → it launches RustDesk and
 connects straight through your relay using that machine's ID + unattended password. 🎉
+
+---
+
+# Part 6 — Real-time backend (optional, ~20 min)
+
+This is the **Phase 1 real-time foundation**. It is **entirely optional and additive** — the
+system in Parts 1–5 works exactly as before without it. Adding it gives you live presence,
+live CPU/RAM/disk metrics, and instant "Run now" command delivery, with **automatic fallback
+to 60 s polling** whenever the backend or an agent's WebSocket is unavailable.
+
+It runs as a small **Node.js** service on the **same VPS as the RustDesk relay** (Part 2),
+behind a TLS reverse proxy. It **never connects to HostGator MySQL** — HostGator's shared
+MySQL isn't reachable from the VPS. Instead it calls the portal's HTTPS service API
+(`/api/svc/*`) with a shared secret, and keeps live presence/metrics in its own in-memory
+store. The PHP portal + MySQL stay the single source of truth.
+
+> Wire-protocol reference: [`realtime/PROTOCOL.md`](realtime/PROTOCOL.md). Full contract:
+> [`realtime/PHASE1-SPEC.md`](realtime/PHASE1-SPEC.md).
+
+```
+   Client PCs              HostGator                    Your VPS (one box)
+ ┌────────────┐  HTTPS    ┌──────────────┐           ┌───────────────────────────┐
+ │ 8West Agent│ ─poll────►│ support.     │◄──HTTPS───┤ rt.8westit.com (Caddy 443) │
+ │ (.NET svc) │           │ 8westit.com  │  service  │   └─► milepost-rt (Node)    │
+ │            │ ═WSS══════╪══════════════╪═══════════╪═════► ws://127.0.0.1:8090   │
+ └────────────┘  realtime │ /api/svc/*   │  secret   │ relay.8westit.com (hbbs/hbbr)│
+                          └──────────────┘           └───────────────────────────┘
+```
+
+### 6.1 DNS
+
+Add the `rt` A-record from Part 1 (→ the **same VPS IP** as `relay`). TLS for `rt.8westit.com`
+is obtained automatically by Caddy (Let's Encrypt), so `rt` must resolve before you start it.
+
+### 6.2 Generate the shared service secret
+
+This single 64-hex secret authenticates backend→portal calls. Generate it **once** on the VPS:
+```bash
+openssl rand -hex 32
+```
+You will paste this **identical** value in two places (they must be byte-for-byte equal):
+- Portal `config.php` → `'service_secret'`
+- Backend `.env` → `MILEPOST_SERVICE_SECRET`
+
+### 6.3 Portal side (HostGator)
+
+1. **Run the DB migration.** cPanel → **phpMyAdmin** → select your DB → **Import** →
+   `portal/db/migrations/2026-07-01_realtime_foundation.sql` → **Go**. (Optional: run the
+   §4.1 backfill from that file afterward.) All columns are additive/nullable — existing
+   polling reads none of them, so this changes no behavior on its own.
+   > MySQL 8 has no `ADD COLUMN IF NOT EXISTS`. If a re-run reports "Duplicate column name",
+   > delete that one line and re-run — the rest is idempotent (`CREATE TABLE IF NOT EXISTS`).
+2. **Upload the new PHP files**: `portal/lib/svc_auth.php`, `portal/lib/policy.php`, and the
+   whole `portal/public/api/svc/` folder (including its `.htaccess`).
+3. **Add the real-time keys to `config.php`** (inside the `return [ ... ]` array):
+   ```php
+   'service_secret'        => '<the 64-hex secret from 6.2>',   // == backend MILEPOST_SERVICE_SECRET
+   'service_replay_window' => 300,                              // seconds; ±skew on service calls
+   'realtime' => [
+       'enabled'      => false,                                 // leave OFF until 6.5 verified
+       'backend_url'  => 'https://rt.8westit.com',              // portal → backend /internal/*
+       'agent_ws_url' => 'wss://rt.8westit.com/agent',          // advertised to agents
+       'dispatch_timeout_ms' => 4000,
+   ],
+   ```
+   Leave `'enabled' => false` for now — no agent will touch the backend until you flip it.
+
+### 6.4 Backend side (VPS, beside RustDesk)
+
+On the VPS, put the backend next to the relay (e.g. `/opt/milepost-rt`), copy the repo's
+`realtime/backend/` there, plus `realtime/deploy/Caddyfile` and
+`realtime/deploy/docker-compose.snippet.yml`.
+
+1. **Create the `.env`** from the sample:
+   ```bash
+   cd /opt/milepost-rt/backend
+   cp .env.sample .env
+   ```
+   Then edit `.env` and set at minimum:
+   ```ini
+   PORT=8090
+   BIND=127.0.0.1                                  # localhost only — Caddy reaches it
+   WS_PATH=/agent
+   PORTAL_BASE_URL=https://support.8westit.com     # the portal origin (svc endpoints live under /api/svc/)
+   MILEPOST_SERVICE_SECRET=<the 64-hex secret from 6.2>   # MUST equal portal service_secret
+   ```
+   The remaining keys (ping/hello timeouts, metrics cadences, throttles, SQLite path, log
+   level) have safe defaults documented in `.env.sample`. **Never log tokens or secrets.**
+2. **Bring up the backend + Caddy.** The `docker-compose.snippet.yml` defines two services —
+   `milepost-rt` (the Node backend, bound to `127.0.0.1:8090`) and `caddy` (TLS on 80/443).
+   Merge it into your relay `docker-compose.yml`, or run it as its own stack alongside the
+   relay containers:
+   ```bash
+   sudo docker compose up -d milepost-rt caddy
+   sudo docker compose ps          # both should say "Up"
+   ```
+   Caddy uses `realtime/deploy/Caddyfile`, which simply reverse-proxies `rt.8westit.com` →
+   `127.0.0.1:8090` (it forwards the WebSocket `Upgrade`/`Connection` headers automatically).
+   On an nginx box instead of Caddy, set `proxy_set_header Upgrade $http_upgrade;`,
+   `proxy_set_header Connection "upgrade";`, and keep `proxy_read_timeout 75s;` — **above** the
+   30 s ping interval so pings keep the socket alive.
+
+### 6.5 Firewall ports
+
+The backend stays bound to **localhost**; only Caddy is public.
+```bash
+sudo ufw allow 80/tcp          # Caddy — HTTP→HTTPS redirect + ACME
+sudo ufw allow 443/tcp         # Caddy — WSS + /internal/* (TLS)
+# 21115:21119/tcp + 21116/udp (RustDesk, from Part 2.4) stay as-is.
+# Do NOT open 8090 — it is bound to 127.0.0.1 and reached only by Caddy.
+# No DB port is opened anywhere; the backend has no DB client.
+```
+Optionally restrict `/internal/*` to HostGator's egress IPs at the proxy (the shared secret
+already guards it).
+
+### 6.6 Verify the backend before pointing agents at it
+
+```bash
+# Health probe (localhost on the VPS):
+curl -s http://127.0.0.1:8090/healthz
+# → {"ok":true,"connections":0,"portal_reachable":true,"uptime_s":…}
+
+# Through Caddy / public TLS:
+curl -s https://rt.8westit.com/healthz
+```
+`portal_reachable:true` confirms the backend can sign and reach `/api/svc/*` with the secret.
+If it's `false`, the secret doesn't match the portal's `service_secret`, or `PORTAL_BASE_URL`
+is wrong. Run the test suite anytime with `node --test` in `realtime/backend/`.
+
+### 6.7 Turn it on — and the canary
+
+1. **Flip the portal flag:** set `'enabled' => true` in `config.php`'s `realtime` block.
+   Now `enroll.php` and `heartbeat.php` append `realtime_url` to their JSON. **Fielded
+   (old) agents ignore the unknown field and keep polling** — only `1.1.0`+ agents act on it.
+2. **Canary one machine first.** Either set `RealtimeUrl` in
+   `HKLM\SOFTWARE\8WestIT\Agent` on one PC, or install agent **1.1.0** on one PC. Confirm:
+   - Dashboard shows live CPU/RAM/disk for that machine (updates faster than 60 s).
+   - "Run now" returns output near-instantly; `agents.rt_supported` flips to `1`.
+   - **Pull the backend** (`docker compose stop milepost-rt`) → within ~45 s the agent falls
+     back to full polling, the dashboard shows "live metrics unavailable, last seen X", and
+     commands still run over the poll path. Bring it back → it reconnects on its own.
+3. **Roll `1.1.0` out** through the normal MSI/update channel once the canary looks good.
+
+### 6.8 Roll back any time
+
+- Set `'enabled' => false` in `config.php` → agents drop the WS within one heartbeat and
+  behave exactly as before.
+- Or `sudo docker compose stop milepost-rt` → agents detect the dead socket in ~45 s, back
+  off, and keep polling.
+
+Nothing in the truth DB depends on the backend; the new tables/columns are simply unused while
+real-time is off. **No MSI rebuild is needed to enable real-time** — only the portal config
+change; the registry keys exist purely as a per-machine override / kill switch
+(`RealtimeEnabled=0` forces pure polling on that PC).
 
 ---
 

@@ -1,6 +1,7 @@
 <?php
 declare(strict_types=1);
 require_once __DIR__ . '/../lib/render.php';
+require_once __DIR__ . '/../lib/realtime.php';
 enforce_https();
 $user = require_login();
 
@@ -26,12 +27,46 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
         if ($type !== 'restart' && trim($payload) === '') {
             $flash = 'Nothing to run — command was empty.';
         } else {
-            $ins = db()->prepare(
-                'INSERT INTO jobs (agent_id, created_by, job_type, payload) VALUES (?,?,?,?)'
-            );
-            $ins->execute([$id, $user['id'], $type, $payload]);
-            audit((int)$user['id'], $id, 'queue_job', "type=$type");
-            $flash = 'Command queued. It will run on the next agent check-in.';
+            // Try real-time first: if the agent is connected to the RT backend, mint the job
+            // already-claimed (status=running) and push it over WS so it runs in seconds.
+            // On any failure (RT disabled, backend down, agent not connected) fall back to the
+            // existing polling queue exactly as before — the safety floor never goes away.
+            $delivered = false;
+            if (rt_enabled() && rt_agent_online($id)) {
+                // Mint the row already claimed for RT so the 60s poller (status=queued) can't grab it.
+                $ins = db()->prepare(
+                    'INSERT INTO jobs (agent_id, created_by, job_type, payload, status, queued_at,
+                        picked_at, delivered_via)
+                     VALUES (?,?,?,?,\'running\',NOW(),NOW(),\'realtime\')'
+                );
+                $ins->execute([$id, $user['id'], $type, $payload]);
+                $jobId = (int) db()->lastInsertId();
+
+                $res = rt_dispatch_command($id, $jobId, $type, $payload);
+                if (!empty($res['delivered'])) {
+                    $delivered = true;
+                    audit((int)$user['id'], $id, 'queue_job', "type=$type via=realtime job=$jobId");
+                    $flash = 'Command sent in real time — running now on the agent.';
+                } else {
+                    // Backend accepted us but couldn't deliver (agent dropped): drop back to polling.
+                    db()->prepare(
+                        'UPDATE jobs SET status=\'queued\', picked_at=NULL, delivered_via=\'poll\'
+                          WHERE id=? AND status=\'running\''
+                    )->execute([$jobId]);
+                    audit((int)$user['id'], $id, 'queue_job', "type=$type via=poll(rt_fallback) job=$jobId");
+                    $flash = 'Command queued. It will run on the next agent check-in.';
+                    $delivered = true; // job already created; skip the plain insert below
+                }
+            }
+
+            if (!$delivered) {
+                $ins = db()->prepare(
+                    'INSERT INTO jobs (agent_id, created_by, job_type, payload) VALUES (?,?,?,?)'
+                );
+                $ins->execute([$id, $user['id'], $type, $payload]);
+                audit((int)$user['id'], $id, 'queue_job', "type=$type via=poll");
+                $flash = 'Command queued. It will run on the next agent check-in.';
+            }
         }
     } elseif ($action === 'update_agent') {
         $name = mb_substr(trim((string)($_POST['display_name'] ?? '')), 0, 128);
