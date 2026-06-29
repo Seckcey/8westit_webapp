@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Milepost — style preview</title>
+<link rel="stylesheet" href="assets/css/app.css">
+<style>/* preview-only: not part of the app */ body{padding-bottom:60px}</style>
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="#">
+    <span class="brand-fallback" style="display:flex">
+      <span class="badge">8</span>
+      <span class="brand-name">Milepost <small>by 8 West IT</small></span>
+    </span>
+  </a>
+  <nav class="topnav">
+    <a href="#">Dashboard</a><a href="#">Clients</a><a href="#">Deploy&nbsp;Agent</a><a href="#">Users</a>
+    <a class="who" href="#">Frank</a><a class="btn-ghost" href="#">Sign out</a>
+  </nav>
+</header>
+
+<main class="container">
+  <div class="page-head">
+    <h2>Dashboard</h2>
+    <div class="stat-pills">
+      <span class="pill pill-on"><b>7</b> online</span>
+      <span class="pill pill-off"><b>2</b> offline</span>
+      <span class="pill"><b>9</b> total</span>
+    </div>
+  </div>
+
+  <section class="card folder">
+    <details open>
+      <summary>
+        <span class="folder-ico">📁</span>
+        <span class="folder-name">Tanner Engineering</span>
+        <span class="folder-stats"><span class="pill pill-on"><b>6</b> online</span><span class="pill"><b>8</b> total</span></span>
+      </summary>
+      <h4 class="site-head">📍 Main Office</h4>
+      <table class="grid agents-grid">
+        <thead><tr><th></th><th>Computer</th><th>User</th><th>OS</th><th>Tags</th><th>Public IP</th><th>Last seen</th><th></th></tr></thead>
+        <tbody>
+          <tr><td><span class="dot dot-on"></span></td><td><a href="#">TANNER-WS-01</a></td><td>tanner\jane</td><td>Windows 11 Pro</td><td><span class="tag">workstation</span></td><td>98.97.141.183</td><td class="muted">12s ago</td><td><a class="btn-sm btn-primary" href="#">Remote&nbsp;In</a></td></tr>
+          <tr><td><span class="dot dot-on"></span></td><td><a href="#">TANNER-WS-02</a></td><td>tanner\mike</td><td>Windows 11 Pro</td><td><span class="tag">reception</span></td><td>98.97.141.184</td><td class="muted">40s ago</td><td><a class="btn-sm btn-primary" href="#">Remote&nbsp;In</a></td></tr>
+          <tr><td><span class="dot dot-off"></span></td><td><a href="#">TANNER-SRV-01</a></td><td>—</td><td>Windows Server 2022</td><td><span class="tag">server</span></td><td>—</td><td class="muted">3h ago</td><td><a class="btn-sm btn-ghost" href="#">Open</a></td></tr>
+        </tbody>
+      </table>
+    </details>
+  </section>
+
+  <div class="cols">
+    <section class="card">
+      <h3>Run a command</h3>
+      <form>
+        <label>Type
+          <select><option>PowerShell</option><option>CMD</option><option>Restart computer</option></select>
+        </label>
+        <label>Command
+          <textarea rows="3" placeholder="Get-Service | Where-Object Status -eq 'Stopped'"></textarea>
+        </label>
+        <button class="btn-primary" type="button">Queue command</button>
+      </form>
+    </section>
+    <section class="card">
+      <h3>System</h3>
+      <dl class="kv">
+        <dt>Status</dt><dd>Online · 12s ago</dd>
+        <dt>Hostname</dt><dd>TANNER-WS-01</dd>
+        <dt>OS</dt><dd>Windows 11 Pro</dd>
+        <dt>RustDesk ID</dt><dd>70960005</dd>
+      </dl>
+      <p style="margin-top:14px">
+        <a class="btn-primary" href="#">Remote In</a>
+        <a class="btn-ghost" href="#">Open</a>
+        <span class="tag tag-done">done</span> <span class="tag tag-running">running</span> <span class="tag tag-queued">queued</span>
+      </p>
+    </section>
+  </div>
+
+  <div class="alert alert-ok">Deployment created. Share the link or QR below.</div>
+</main>
+</body>
+</html>
