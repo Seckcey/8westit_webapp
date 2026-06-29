@@ -19,7 +19,10 @@ $out = [];
 foreach ($rows as $r) {
     $id = (int)$r['id'];
     $p  = $live[$id] ?? null;
-    $isOnline = ($p !== null) ? !empty($p['online']) : agent_is_online($r);
+    // Online if RT-connected OR recently seen via polling. Real-time presence only ADDS
+    // online-ness; it must not demote a polling-online agent (the backend reports
+    // {online:false} for every agent that isn't holding a live WebSocket right now).
+    $isOnline = ($p !== null && !empty($p['online'])) || agent_is_online($r);
     $out[] = [
         'id'        => $id,
         'online'    => $isOnline,

@@ -17,10 +17,13 @@ $rows = db()->query(
 $allIds = array_map(static fn($r) => (int)$r['id'], $rows);
 $live = rt_enabled() ? rt_presence($allIds) : [];
 
-/** Online for a row, preferring live presence, falling back to the last_seen heuristic. */
+/** Online if the agent holds a live real-time connection OR was seen recently (polling).
+ *  Real-time presence only ADDS online-ness — it must never demote a polling-online agent:
+ *  the backend returns {online:false} for every agent that isn't currently RT-connected, so a
+ *  plain "prefer RT" would wrongly gray out healthy poll-only / older agents. */
 function row_online(array $r, array $live): bool {
     $p = $live[(int)$r['id']] ?? null;
-    return $p !== null ? !empty($p['online']) : agent_is_online($r);
+    return ($p !== null && !empty($p['online'])) || agent_is_online($r);
 }
 
 $total = count($rows); $online = 0;
