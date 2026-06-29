@@ -45,4 +45,14 @@ layout_header('My Account', $user);
     <button class="btn-primary">Update password</button>
   </form>
 </section>
+
+<section class="card" style="max-width:520px">
+  <h3>Appearance</h3>
+  <p class="muted small">Choose how Milepost looks. &ldquo;System&rdquo; follows your device&rsquo;s light or dark setting.</p>
+  <div class="appearance-pick" role="group" aria-label="Appearance">
+    <button type="button" data-theme-set="light"><span aria-hidden="true">&#9728;</span> Light</button>
+    <button type="button" data-theme-set="dark"><span aria-hidden="true">&#9789;</span> Dark</button>
+    <button type="button" data-theme-set="system"><span aria-hidden="true">&#9680;</span> System</button>
+  </div>
+</section>
 <?php layout_footer();

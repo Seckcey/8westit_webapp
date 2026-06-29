@@ -3,6 +3,9 @@
 declare(strict_types=1);
 require_once __DIR__ . '/auth.php';
 
+/** Cache-busting version for static assets. Hand-bump on css/js changes. */
+if (!defined('MP_ASSET_VER')) define('MP_ASSET_VER', '20260629b');
+
 /** Online if seen within 2.5x its heartbeat interval. */
 function agent_is_online(array $a): bool
 {
@@ -34,7 +37,7 @@ function layout_header(string $title, ?array $user): void
 <link rel="icon" href="assets/img/favicon.ico" sizes="any">
 <link rel="apple-touch-icon" href="assets/img/apple-touch-icon.png">
 <script>(function(){try{var t=localStorage.getItem('mp-theme')||'system';document.documentElement.setAttribute('data-theme',t);}catch(e){document.documentElement.setAttribute('data-theme','system');}})();</script>
-<link rel="stylesheet" href="assets/css/app.css">
+<link rel="stylesheet" href="assets/css/app.css?v=<?= MP_ASSET_VER ?>">
 </head>
 <body>
 <header class="topbar">
@@ -53,11 +56,6 @@ function layout_header(string $title, ?array $user): void
     <?php if ($u && ($u['role'] ?? '') === 'admin'): ?>
       <a href="users.php">Users</a>
     <?php endif; ?>
-    <div class="theme-toggle" role="group" aria-label="Appearance">
-      <button type="button" data-theme-set="light" title="Light" aria-label="Light mode">&#9728;</button>
-      <button type="button" data-theme-set="dark" title="Dark" aria-label="Dark mode">&#9789;</button>
-      <button type="button" data-theme-set="system" title="System" aria-label="Match system">&#9680;</button>
-    </div>
     <?php if ($u): ?>
       <a class="who" href="account.php" title="My account"><?= e($u['full_name'] ?: $u['username']) ?></a>
       <a class="btn-ghost" href="logout.php">Sign out</a>
@@ -73,7 +71,7 @@ function layout_footer(): void
     ?>
 </main>
 <footer class="foot">Milepost · an 8 West IT, LLC product · <?= date('Y') ?></footer>
-<script src="assets/js/app.js"></script>
+<script src="assets/js/app.js?v=<?= MP_ASSET_VER ?>"></script>
 </body>
 </html>
 <?php
