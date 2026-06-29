@@ -16,6 +16,14 @@
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
      xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
 
+  <!-- Default value baked into the ENROLLKEY property.
+       Normal build: empty (key supplied at install via msiexec ENROLLKEY=...).
+       Template build (build-templates.ps1): a 64-char placeholder the portal
+       byte-patches with the real key when serving a per-client download. -->
+  <?ifndef EnrollDefault ?>
+    <?define EnrollDefault = "" ?>
+  <?endif?>
+
   <Package Name="8 West IT RMM Agent"
            Manufacturer="8 West IT, LLC"
            Version="1.0.2.0"
@@ -27,7 +35,7 @@
     <MediaTemplate EmbedCab="yes" />
 
     <!-- Supplied on the msiexec command line (or baked in by the build script). -->
-    <Property Id="ENROLLKEY" Secure="yes" />
+    <Property Id="ENROLLKEY" Secure="yes" Value="$(EnrollDefault)" />
     <Property Id="PORTAL" Secure="yes" Value="https://support.8westit.com" />
 
     <Feature Id="MainFeature" Title="Agent">
@@ -77,12 +85,15 @@
         </RegistryKey>
       </Component>
 
-      <!-- Bundled RustDesk client. The agent runs it silently on first start, so
-           every install is self-contained (no GitHub download needed). Resolved
-           from the installer/ bind path passed by build-agent.ps1. -->
+      <!-- Bundled RustDesk client (only when built with -d BundleRustDesk=1).
+           The agent runs it silently on first start, so the install is
+           self-contained. The "lite" template omits it (agent downloads on
+           first run) for a ~1 MB installer. -->
+      <?ifdef BundleRustDesk ?>
       <Component Id="cmpRustDeskSetup" Bitness="always64">
         <File Id="RustDeskSetup" Source="rustdesk-setup.exe" KeyPath="yes" />
       </Component>
+      <?endif?>
 
     </ComponentGroup>
   </Package>

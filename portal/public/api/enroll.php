@@ -33,6 +33,16 @@ if (!$ek) {
     audit(null, null, 'enroll', 'rejected bad key host=' . $hostname);
     json_err('Enrollment key not recognized', 403);
 }
+if (!empty($ek['expires_at']) && strtotime($ek['expires_at'] . ' UTC') < time()) {
+    audit(null, null, 'enroll', 'rejected expired key host=' . $hostname);
+    json_err('Enrollment key has expired', 403);
+}
+
+// Deployment options carried by the key (columns may be absent on very old DBs).
+$kSite   = (string)($ek['site'] ?? '');
+$kTags   = (string)($ek['tags'] ?? '');
+$kPrefix = (string)($ek['name_prefix'] ?? '');
+$displayName = ($kPrefix !== '' ? $kPrefix : '') . $hostname;
 
 // Issue a fresh token (returned once, stored only as a hash).
 $token = bin2hex(random_bytes(32));
@@ -45,21 +55,30 @@ $stmt->execute([$uid]);
 $existing = $stmt->fetch();
 
 if ($existing) {
+    // Re-enroll: keep existing client/site/tags if already set, else apply the key's.
     $stmt = $pdo->prepare(
         'UPDATE agents SET auth_token_hash=?, hostname=?, os_name=?, os_version=?,
-            agent_version=?, client_id=COALESCE(client_id, ?), is_archived=0
+            agent_version=?, client_id=COALESCE(client_id, ?),
+            site = CASE WHEN site = \'\' THEN ? ELSE site END,
+            tags = CASE WHEN tags = \'\' THEN ? ELSE tags END,
+            is_archived=0
          WHERE id=?'
     );
-    $stmt->execute([$tokenHash, $hostname, $osName, $osVer, $ver, $ek['client_id'], $existing['id']]);
+    $stmt->execute([$tokenHash, $hostname, $osName, $osVer, $ver, $ek['client_id'],
+                    $kSite, $kTags, $existing['id']]);
     $agentId = (int)$existing['id'];
 } else {
     $stmt = $pdo->prepare(
-        'INSERT INTO agents (client_id, agent_uid, auth_token_hash, hostname, display_name,
+        'INSERT INTO agents (client_id, site, tags, agent_uid, auth_token_hash, hostname, display_name,
             os_name, os_version, agent_version, last_seen_at)
-         VALUES (?,?,?,?,?,?,?,?,NOW())'
+         VALUES (?,?,?,?,?,?,?,?,?,?,NOW())'
     );
-    $stmt->execute([$ek['client_id'], $uid, $tokenHash, $hostname, $hostname, $osName, $osVer, $ver]);
+    $stmt->execute([$ek['client_id'], $kSite, $kTags, $uid, $tokenHash, $hostname, $displayName,
+                    $osName, $osVer, $ver]);
     $agentId = (int)$pdo->lastInsertId();
+    // Count installs against the deployment key.
+    $pdo->prepare('UPDATE enrollment_keys SET use_count = use_count + 1 WHERE id = ?')
+        ->execute([$ek['id']]);
 }
 
 audit(null, $agentId, 'enroll', 'host=' . $hostname);

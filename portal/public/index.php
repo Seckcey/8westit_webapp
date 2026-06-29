@@ -8,12 +8,41 @@ $rows = db()->query(
     'SELECT a.*, c.name AS client_name
        FROM agents a LEFT JOIN clients c ON c.id = a.client_id
       WHERE a.is_archived = 0
-      ORDER BY c.name IS NULL, c.name, a.hostname'
+      ORDER BY c.name IS NULL, c.name, a.site, a.hostname'
 )->fetchAll();
 
-$total = count($rows);
-$online = 0;
+$total = count($rows); $online = 0;
 foreach ($rows as $r) if (agent_is_online($r)) $online++;
+
+// Group: client -> site -> [agents]
+$groups = [];
+foreach ($rows as $r) {
+    $cn = $r['client_name'] ?? 'Unassigned';
+    $site = (string)($r['site'] ?? '');
+    if (!isset($groups[$cn])) $groups[$cn] = ['online' => 0, 'total' => 0, 'sites' => []];
+    $groups[$cn]['sites'][$site][] = $r;
+    $groups[$cn]['total']++;
+    if (agent_is_online($r)) $groups[$cn]['online']++;
+}
+
+/** Render one agent row (shared markup so live-refresh JS can target it). */
+function agent_row(array $r): void {
+    $on = agent_is_online($r); ?>
+    <tr>
+      <td><span class="dot <?= $on ? 'dot-on' : 'dot-off' ?>"></span></td>
+      <td><a href="agent.php?id=<?= (int)$r['id'] ?>"><?= e($r['display_name'] ?: $r['hostname']) ?></a></td>
+      <td><?= e($r['last_user'] ?: '—') ?></td>
+      <td><?= e($r['os_name']) ?></td>
+      <td><?php foreach (array_filter(array_map('trim', explode(',', (string)($r['tags'] ?? '')))) as $t): ?><span class="tag"><?= e($t) ?></span> <?php endforeach; ?></td>
+      <td><?= e($r['public_ip'] ?: '—') ?></td>
+      <td class="muted cell-lastseen"><?= e(time_ago($r['last_seen_at'])) ?></td>
+      <td><?php if ($on && $r['rustdesk_id']): ?>
+            <a class="btn-sm btn-primary" href="remote.php?id=<?= (int)$r['id'] ?>">Remote&nbsp;In</a>
+          <?php else: ?>
+            <a class="btn-sm btn-ghost" href="agent.php?id=<?= (int)$r['id'] ?>">Open</a>
+          <?php endif; ?></td>
+    </tr>
+<?php }
 
 layout_header('Dashboard', $user);
 ?>
@@ -28,38 +57,35 @@ layout_header('Dashboard', $user);
 
 <?php if ($total === 0): ?>
   <div class="empty">
-    <p>No agents enrolled yet.</p>
-    <p>Go to <a href="enroll-keys.php">Agents &amp; Keys</a> to create an enrollment key, then build and
-       install the agent MSI on a client computer.</p>
+    <p>No computers enrolled yet.</p>
+    <p>Go to <a href="deploy.php">Deploy Agent</a>, create a deployment for a client, and send or scan
+       the download link on the computer you're setting up.</p>
   </div>
-<?php else: ?>
-<table class="grid" id="agents-grid" data-poll="1">
-  <thead><tr>
-    <th></th><th>Computer</th><th>Client</th><th>User</th>
-    <th>OS</th><th>Public IP</th><th>Last seen</th><th></th>
-  </tr></thead>
-  <tbody>
-  <?php foreach ($rows as $r):
-        $on = agent_is_online($r); ?>
-    <tr>
-      <td><span class="dot <?= $on ? 'dot-on' : 'dot-off' ?>" title="<?= $on ? 'Online' : 'Offline' ?>"></span></td>
-      <td><a href="agent.php?id=<?= (int)$r['id'] ?>"><?= e($r['display_name'] ?: $r['hostname']) ?></a></td>
-      <td><?= e($r['client_name'] ?? '—') ?></td>
-      <td><?= e($r['last_user'] ?: '—') ?></td>
-      <td><?= e($r['os_name']) ?></td>
-      <td><?= e($r['public_ip'] ?: '—') ?></td>
-      <td class="muted"><?= e(time_ago($r['last_seen_at'])) ?></td>
-      <td>
-        <?php if ($on && $r['rustdesk_id']): ?>
-          <a class="btn-sm btn-primary" href="remote.php?id=<?= (int)$r['id'] ?>">Remote&nbsp;In</a>
-        <?php else: ?>
-          <a class="btn-sm btn-ghost" href="agent.php?id=<?= (int)$r['id'] ?>">Open</a>
-        <?php endif; ?>
-      </td>
-    </tr>
-  <?php endforeach; ?>
-  </tbody>
-</table>
+<?php else:
+  $colspan = 8;
+  foreach ($groups as $clientName => $g): ?>
+  <section class="card folder" data-poll="1">
+    <details open>
+      <summary>
+        <span class="folder-ico">📁</span>
+        <span class="folder-name"><?= e($clientName) ?></span>
+        <span class="folder-stats">
+          <span class="pill pill-on"><b><?= $g['online'] ?></b> online</span>
+          <span class="pill"><b><?= $g['total'] ?></b> total</span>
+        </span>
+      </summary>
+      <?php foreach ($g['sites'] as $site => $agents): ?>
+        <?php if ($site !== ''): ?><h4 class="site-head">📍 <?= e($site) ?></h4><?php endif; ?>
+        <table class="grid agents-grid">
+          <thead><tr><th></th><th>Computer</th><th>User</th><th>OS</th><th>Tags</th><th>Public IP</th><th>Last seen</th><th></th></tr></thead>
+          <tbody>
+            <?php foreach ($agents as $r) agent_row($r); ?>
+          </tbody>
+        </table>
+      <?php endforeach; ?>
+    </details>
+  </section>
+<?php endforeach; ?>
 <p class="muted small">Status refreshes automatically every 20 seconds.</p>
 <?php endif; ?>
 <?php layout_footer();

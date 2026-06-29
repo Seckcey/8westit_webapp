@@ -48,7 +48,7 @@ function layout_header(string $title, ?array $user): void
   <nav class="topnav">
     <a href="index.php">Dashboard</a>
     <a href="clients.php">Clients</a>
-    <a href="enroll-keys.php">Agents&nbsp;&amp;&nbsp;Keys</a>
+    <a href="deploy.php">Deploy&nbsp;Agent</a>
     <?php if ($u && ($u['role'] ?? '') === 'admin'): ?>
       <a href="users.php">Users</a>
     <?php endif; ?>

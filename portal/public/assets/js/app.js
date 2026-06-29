@@ -22,22 +22,21 @@
     jobType.addEventListener('change', sync); sync();
   }
 
-  // Live status refresh on the dashboard grid.
-  var grid = document.getElementById('agents-grid');
-  if (grid) {
+  // Live status refresh on the dashboard (works across client/site folders).
+  if (document.querySelector('.agents-grid')) {
     setInterval(function () {
       fetch('status.php', { credentials: 'same-origin' })
         .then(function (r) { return r.json(); })
         .then(function (d) {
           if (!d.ok) return;
           d.agents.forEach(function (a) {
-            var row = grid.querySelector('tr a[href="agent.php?id=' + a.id + '"]');
-            if (!row) return;
-            var tr = row.closest('tr');
+            var link = document.querySelector('.agents-grid a[href="agent.php?id=' + a.id + '"]');
+            if (!link) return;
+            var tr = link.closest('tr');
             var dot = tr.querySelector('.dot');
             if (dot) dot.className = 'dot ' + (a.online ? 'dot-on' : 'dot-off');
-            var cells = tr.querySelectorAll('td');
-            if (cells[6]) cells[6].textContent = a.last_seen;
+            var ls = tr.querySelector('.cell-lastseen');
+            if (ls) ls.textContent = a.last_seen;
           });
         }).catch(function () {});
     }, 20000);

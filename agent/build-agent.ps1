@@ -62,7 +62,8 @@ Write-Host "==> Packaging MSI" -ForegroundColor Cyan
 $msi = Join-Path $distDir "EightWestAgent.msi"
 
 # wix build: -b adds bind paths so <File Source="..."> resolves (agent exe + bundled installer).
-wix build $wxs -ext WixToolset.Util.wixext -b "$binDir" -b "$root\installer" -o $msi
+# -d BundleRustDesk=1 includes the bundled client (direct builds are always self-contained).
+wix build $wxs -ext WixToolset.Util.wixext -d BundleRustDesk=1 -b "$binDir" -b "$root\installer" -o $msi
 
 Write-Host "==> Built: $msi" -ForegroundColor Green
 
