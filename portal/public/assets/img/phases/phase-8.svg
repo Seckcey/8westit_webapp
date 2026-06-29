@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Phase 8 — Service operations">
+  <defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="#0A1A3C"/><stop offset="0.55" stop-color="#122A5A"/><stop offset="1" stop-color="#1F8FD6"/>
+  </linearGradient></defs>
+  <rect x="2" y="2" width="60" height="60" rx="14" fill="url(#g)"/>
+  <g fill="none" stroke="#FFFFFF" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M15 20 H45 a4 4 0 0 1 4 4 V36 a4 4 0 0 1 -4 4 H30 l-7 7 V40 H15 a4 4 0 0 1 -4-4 V24 a4 4 0 0 1 4-4 Z"/></g><path d="M22.5 30 L27.5 35 L37 25" fill="none" stroke="#4DB4EC" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

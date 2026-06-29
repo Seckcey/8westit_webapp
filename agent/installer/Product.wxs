@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  8 West IT RMM Agent — WiX v5 installer.
+  Milepost Agent — WiX v5 installer.
 
   Builds an MSI that:
     * installs EightWestAgent.exe to "Program Files\8 West IT\Agent"
@@ -24,14 +24,14 @@
     <?define EnrollDefault = "" ?>
   <?endif?>
 
-  <Package Name="8 West IT RMM Agent"
+  <Package Name="Milepost Agent"
            Manufacturer="8 West IT, LLC"
-           Version="1.0.2.0"
+           Version="1.0.3.0"
            UpgradeCode="7B3F2A14-9C6E-4D2B-AE51-8F0C2D6A1E90"
            Compressed="yes"
            Scope="perMachine">
 
-    <MajorUpgrade DowngradeErrorMessage="A newer version of the 8 West IT Agent is already installed." />
+    <MajorUpgrade DowngradeErrorMessage="A newer version of the Milepost Agent is already installed." />
     <MediaTemplate EmbedCab="yes" />
 
     <!-- Supplied on the msiexec command line (or baked in by the build script). -->
@@ -56,8 +56,8 @@
 
         <ServiceInstall Id="svcInstall"
                         Name="EightWestAgent"
-                        DisplayName="8 West IT RMM Agent"
-                        Description="Reports status and enables remote support for 8 West IT, LLC."
+                        DisplayName="Milepost Agent"
+                        Description="Milepost RMM agent by 8 West IT — reports status and enables remote support."
                         Type="ownProcess"
                         Start="auto"
                         Account="LocalSystem"

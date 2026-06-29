@@ -11,9 +11,9 @@
     <LangVersion>latest</LangVersion>
     <AssemblyName>EightWestAgent</AssemblyName>
     <RootNamespace>EightWest.Agent</RootNamespace>
-    <Version>1.0.2</Version>
+    <Version>1.0.3</Version>
     <Company>8 West IT, LLC</Company>
-    <Product>8 West IT RMM Agent</Product>
+    <Product>Milepost Agent</Product>
     <UseWindowsForms>false</UseWindowsForms>
   </PropertyGroup>
 

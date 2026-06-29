@@ -18,8 +18,8 @@ namespace EightWest.Agent
             var service = new ServiceInstaller
             {
                 ServiceName = Program.ServiceName,
-                DisplayName = "8 West IT RMM Agent",
-                Description = "Reports status and enables remote support for 8 West IT, LLC.",
+                DisplayName = "Milepost Agent",
+                Description = "Milepost RMM agent by 8 West IT — reports status and enables remote support.",
                 StartType = ServiceStartMode.Automatic,
             };
             Installers.Add(process);

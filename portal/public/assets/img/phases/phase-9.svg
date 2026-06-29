@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Phase 9 — AI copilot &amp; autonomous IT">
+  <defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="#0A1A3C"/><stop offset="0.55" stop-color="#122A5A"/><stop offset="1" stop-color="#1F8FD6"/>
+  </linearGradient></defs>
+  <rect x="2" y="2" width="60" height="60" rx="14" fill="url(#g)"/>
+  <g fill="none" stroke="#FFFFFF" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><circle cx="30" cy="32" r="12"/></g><path d="M30 24 L32.56 29.44 L38 32 L32.56 34.56 L30 40 L27.44 34.56 L22 32 L27.44 29.44 Z" fill="#4DB4EC"/><circle cx="48" cy="18" r="2.6" fill="#FFFFFF"/><circle cx="50" cy="41" r="2" fill="#FFFFFF"/>
+</svg>

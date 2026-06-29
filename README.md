@@ -1,6 +1,7 @@
-# 8 West IT — RMM (Remote Monitoring & Management)
+# Milepost — RMM (Remote Monitoring & Management)
 
-A self-hosted platform to track client computers and remote into them for support.
+**Milepost** is an open-source RMM by **8 West IT, LLC** — a self-hosted platform to track client
+computers and remote into them for support. *Every endpoint, every mile.*
 
 > **Deploying it? Follow [DEPLOYMENT.md](DEPLOYMENT.md)** — a detailed, step-by-step guide
 > (DNS → relay → portal → agent → remote-in). This README is the architecture overview.

@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Phase 2 — Monitoring &amp; smart alerting">
+  <defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="#0A1A3C"/><stop offset="0.55" stop-color="#122A5A"/><stop offset="1" stop-color="#1F8FD6"/>
+  </linearGradient></defs>
+  <rect x="2" y="2" width="60" height="60" rx="14" fill="url(#g)"/>
+  <g fill="none" stroke="#FFFFFF" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M17 42 a15 15 0 0 1 30 0"/><path d="M32 42 L41 31"/></g><circle cx="32" cy="42" r="3" fill="#FFFFFF"/><circle cx="48" cy="19" r="4" fill="#C41E2A"/>
+</svg>

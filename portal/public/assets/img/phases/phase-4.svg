@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Phase 4 — Automation &amp; self-healing">
+  <defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="#0A1A3C"/><stop offset="0.55" stop-color="#122A5A"/><stop offset="1" stop-color="#1F8FD6"/>
+  </linearGradient></defs>
+  <rect x="2" y="2" width="60" height="60" rx="14" fill="url(#g)"/>
+  <g fill="none" stroke="#FFFFFF" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><circle cx="28" cy="36" r="8.5"/><path d="M36.5 36.0 L40.5 36.0"/><path d="M34.0 42.0 L36.8 44.8"/><path d="M28.0 44.5 L28.0 48.5"/><path d="M22.0 42.0 L19.2 44.8"/><path d="M19.5 36.0 L15.5 36.0"/><path d="M22.0 30.0 L19.2 27.2"/><path d="M28.0 27.5 L28.0 23.5"/><path d="M34.0 30.0 L36.8 27.2"/><circle cx="28" cy="36" r="2.6"/></g><path d="M47 12 L49.24 16.759999999999998 L54 19 L49.24 21.240000000000002 L47 26 L44.76 21.240000000000002 L40 19 L44.76 16.759999999999998 Z" fill="#4DB4EC"/>
+</svg>

@@ -30,17 +30,17 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
 ?><!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Setup · 8 West IT RMM</title>
+<title>Setup · Milepost</title>
 <link rel="icon" href="assets/img/favicon.ico" sizes="any">
 <link rel="apple-touch-icon" href="assets/img/apple-touch-icon.png">
 <link rel="stylesheet" href="assets/css/app.css"></head>
 <body class="login-body">
 <div class="login-card">
   <div class="login-brand">
-    <img src="assets/img/logo-stacked.png" alt="8 West IT" class="login-logo"
+    <img src="assets/img/logo-stacked.png" alt="Milepost" class="login-logo"
          onerror="this.style.display='none';this.nextElementSibling.style.display='inline-grid';">
     <span class="badge login-fallback-badge">8</span>
-    <h1>First-run setup</h1><p>Create your admin account</p>
+    <h1>Milepost</h1><p>First-run setup — create your admin account</p>
   </div>
   <?php if ($msg): ?><div class="alert"><?= e($msg) ?></div><?php endif; ?>
   <form method="post">

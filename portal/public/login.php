@@ -18,7 +18,7 @@ $csrf = csrf_token();
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Sign in · 8 West IT RMM</title>
+<title>Sign in · Milepost</title>
 <link rel="icon" href="assets/img/favicon.ico" sizes="any">
 <link rel="apple-touch-icon" href="assets/img/apple-touch-icon.png">
 <link rel="stylesheet" href="assets/css/app.css">
@@ -26,10 +26,10 @@ $csrf = csrf_token();
 <body class="login-body">
 <div class="login-card">
   <div class="login-brand">
-    <img src="assets/img/logo-stacked.png" alt="8 West IT" class="login-logo"
+    <img src="assets/img/logo-stacked.png" alt="Milepost" class="login-logo"
          onerror="this.style.display='none';this.nextElementSibling.style.display='inline-grid';">
     <span class="badge login-fallback-badge">8</span>
-    <h1>8 West IT</h1><p>Remote Management Portal</p>
+    <h1>Milepost</h1><p>by 8 West IT · Remote Management</p>
   </div>
   <?php if ($error): ?><div class="alert"><?= e($error) ?></div><?php endif; ?>
   <form method="post" autocomplete="off">

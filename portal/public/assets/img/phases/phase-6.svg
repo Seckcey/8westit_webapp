@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Phase 6 — Security &amp; compliance">
+  <defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="#0A1A3C"/><stop offset="0.55" stop-color="#122A5A"/><stop offset="1" stop-color="#1F8FD6"/>
+  </linearGradient></defs>
+  <rect x="2" y="2" width="60" height="60" rx="14" fill="url(#g)"/>
+  <g fill="none" stroke="#FFFFFF" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M32 13 L46 19 V31 C46 41 39.5 47.5 32 50.5 C24.5 47.5 18 41 18 31 V19 Z"/></g><path d="M25.5 32 L30 36.5 L39 26" fill="none" stroke="#4DB4EC" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

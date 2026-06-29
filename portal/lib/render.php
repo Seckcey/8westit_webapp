@@ -30,7 +30,7 @@ function layout_header(string $title, ?array $user): void
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title><?= e($title) ?> · 8 West IT RMM</title>
+<title><?= e($title) ?> · Milepost</title>
 <link rel="icon" href="assets/img/favicon.ico" sizes="any">
 <link rel="apple-touch-icon" href="assets/img/apple-touch-icon.png">
 <link rel="stylesheet" href="assets/css/app.css">
@@ -38,11 +38,11 @@ function layout_header(string $title, ?array $user): void
 <body>
 <header class="topbar">
   <a class="brand" href="index.php">
-    <img src="assets/img/logo-horizontal.png" alt="8 West IT" class="brand-logo"
+    <img src="assets/img/logo-horizontal.png" alt="Milepost" class="brand-logo"
          onerror="this.style.display='none';this.nextElementSibling.style.display='flex';">
     <span class="brand-fallback">
       <span class="badge">8</span>
-      <span class="brand-name">8 West IT <small>Remote Management</small></span>
+      <span class="brand-name">Milepost <small>by 8 West IT</small></span>
     </span>
   </a>
   <nav class="topnav">
@@ -66,7 +66,7 @@ function layout_footer(): void
 {
     ?>
 </main>
-<footer class="foot">8 West IT, LLC · RMM Portal · <?= date('Y') ?></footer>
+<footer class="foot">Milepost · an 8 West IT, LLC product · <?= date('Y') ?></footer>
 <script src="assets/js/app.js"></script>
 </body>
 </html>

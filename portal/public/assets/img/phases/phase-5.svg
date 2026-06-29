@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Phase 5 — Remote tools &amp; technician UX">
+  <defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="#0A1A3C"/><stop offset="0.55" stop-color="#122A5A"/><stop offset="1" stop-color="#1F8FD6"/>
+  </linearGradient></defs>
+  <rect x="2" y="2" width="60" height="60" rx="14" fill="url(#g)"/>
+  <g fill="none" stroke="#FFFFFF" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><rect x="13" y="16" width="26" height="19" rx="3"/><path d="M21 43 H31 M26 35 V43"/></g><path d="M40 27 L53 32 L46.5 34.5 L50 41 L46.5 42.5 L43 36 L39 39 Z" fill="#4DB4EC" stroke="#0A1A3C" stroke-width="1" stroke-linejoin="round"/>
+</svg>
