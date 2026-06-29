@@ -94,6 +94,73 @@ $jobs = db()->prepare('SELECT * FROM jobs WHERE agent_id=? ORDER BY id DESC LIMI
 $jobs->execute([$id]);
 $jobRows = $jobs->fetchAll();
 
+// ── Live metrics card (server-rendered initial values so it works with JS off and
+//    never flashes empty). Same three-way source resolution as agent_live.php.
+//    realtime.php is already required at the top of this file.
+$ms = db()->prepare('SELECT cpu, mem, disk_c, uptime_secs, logged_user, sampled_at FROM agent_metrics_latest WHERE agent_id=?');
+$ms->execute([$id]);
+$snap = $ms->fetch();
+$live = rt_enabled() ? rt_presence_one($id) : null;
+
+if ($live && !empty($live['online'])) {
+    $liveSrc    = 'realtime';
+    $liveOnline = true;
+    $liveCpu    = isset($live['cpu'])    ? (float)$live['cpu']    : null;
+    $liveMem    = isset($live['mem'])    ? (float)$live['mem']    : null;
+    $liveDisk   = isset($live['disk_c']) ? (float)$live['disk_c'] : null;
+    $liveUptime = isset($live['uptime_secs']) ? (int)$live['uptime_secs'] : null;
+    $liveUser   = ($agent['last_user'] !== '') ? $agent['last_user'] : null;
+} elseif ($snap) {
+    $liveSrc    = 'snapshot';
+    $liveOnline = agent_is_online($agent);
+    $liveCpu    = $snap['cpu']    !== null ? (float)$snap['cpu']    : null;
+    $liveMem    = $snap['mem']    !== null ? (float)$snap['mem']    : null;
+    $liveDisk   = $snap['disk_c'] !== null ? (float)$snap['disk_c'] : null;
+    $liveUptime = $snap['uptime_secs'] !== null ? (int)$snap['uptime_secs'] : null;
+    $liveUser   = ($snap['logged_user'] !== '') ? $snap['logged_user'] : null;
+} else {
+    $liveSrc    = 'none';
+    $liveOnline = agent_is_online($agent);
+    $liveCpu    = null;
+    $liveMem    = null;
+    $liveDisk   = null;
+    $liveUptime = null;
+    $liveUser   = ($agent['last_user'] !== '') ? $agent['last_user'] : null;
+}
+$liveAge = ($snap && !empty($snap['sampled_at']))
+    ? max(0, time() - strtotime($snap['sampled_at'] . ' UTC'))
+    : null;
+
+// Humanize uptime for the server-rendered tile (mirrors humanUptime() in app.js).
+$fmtUp = static function (?int $s): string {
+    if ($s === null) return '—';
+    $s = max(0, $s);
+    $d = intdiv($s, 86400);
+    $h = intdiv($s % 86400, 3600);
+    $m = intdiv($s % 3600, 60);
+    if ($d > 0) return $d . 'd ' . $h . 'h';
+    if ($h > 0) return $h . 'h ' . $m . 'm';
+    if ($m > 0) return $m . 'm';
+    return '<1m';
+};
+// Trim trailing zero from a percentage (42.0 -> "42", 42.5 -> "42.5").
+$fmtPct = static function (?float $v): string {
+    if ($v === null) return '—';
+    return rtrim(rtrim(number_format($v, 1, '.', ''), '0'), '.');
+};
+// Humanize a "seconds ago" age (mirrors humanAge() in app.js).
+$fmtAge = static function (?int $s): string {
+    if ($s === null) return '';
+    $s = max(0, $s);
+    if ($s < 60)    return $s . 's ago';
+    if ($s < 3600)  return intdiv($s, 60) . 'm ago';
+    if ($s < 86400) return intdiv($s, 3600) . 'h ago';
+    return intdiv($s, 86400) . 'd ago';
+};
+// A snapshot older than ~2.5 heartbeats is "stale" — flagged visually, not shown as "live".
+$staleAfter = max(60, (int)$agent['heartbeat_secs']) * 2.5;
+$liveStale  = ($liveSrc === 'snapshot' && $liveAge !== null && $liveAge > $staleAfter);
+
 $online = agent_is_online($agent);
 $csrf = csrf_token();
 layout_header($agent['display_name'] ?: $agent['hostname'], $user);
@@ -111,6 +178,42 @@ layout_header($agent['display_name'] ?: $agent['hostname'], $user);
   </div>
 </div>
 <?php if ($flash): ?><div class="alert alert-ok"><?= e($flash) ?></div><?php endif; ?>
+
+<section class="card mp-live" data-agent-live="<?= $id ?>" data-heartbeat="<?= (int)$agent['heartbeat_secs'] ?>">
+  <h3>Live
+    <span class="mp-fresh<?= $liveStale ? ' mp-stale' : '' ?>" data-live-fresh><?php
+      if ($liveSrc === 'realtime') { echo 'live'; }
+      elseif ($liveSrc === 'snapshot') { echo 'as of ' . e($fmtAge($liveAge)); }
+      else { echo '—'; }
+    ?></span>
+    <span class="dot <?= $liveOnline ? 'dot-on' : 'dot-off' ?>" data-live-dot></span>
+  </h3>
+  <?php
+    // Always render the tile grid (with em-dash placeholders when a value is null) so the
+    // 7s poller can fill it in place — including the brand-new agent / fresh-DB case, where
+    // the page starts in 'none' and becomes live with no reload. The hint below is just
+    // toggled. Each metric tile carries a (possibly hidden) unit span the poller reconciles.
+    $tiles = [['cpu', 'CPU', $liveCpu], ['mem', 'Memory', $liveMem], ['disk_c', 'Disk C:', $liveDisk]];
+  ?>
+  <div class="mp-live-grid">
+    <?php foreach ($tiles as [$k, $lbl, $val]): ?>
+      <div class="mp-tile">
+        <div class="mp-tile-label"><?= $lbl ?></div>
+        <div class="mp-tile-val"><span data-metric="<?= $k ?>"><?= e($fmtPct($val)) ?></span><span class="mp-unit" data-unit="<?= $k ?>"<?= $val === null ? ' hidden' : '' ?>>%</span></div>
+        <div class="mp-bar"><span class="mp-bar-fill" data-bar="<?= $k ?>" style="width:<?= $val !== null ? max(0, min(100, $val)) : 0 ?>%"></span></div>
+      </div>
+    <?php endforeach; ?>
+    <div class="mp-tile mp-tile-nobar">
+      <div class="mp-tile-label">Uptime</div>
+      <div class="mp-tile-val"><span data-metric="uptime"><?= e($fmtUp($liveUptime)) ?></span></div>
+    </div>
+    <div class="mp-tile mp-tile-nobar">
+      <div class="mp-tile-label">Logged-in user</div>
+      <div class="mp-tile-val mp-user"><span data-metric="user"><?= $liveUser !== null ? e($liveUser) : '—' ?></span></div>
+    </div>
+  </div>
+  <p class="muted small mp-live-hint" data-live-empty<?= $liveSrc === 'none' ? '' : ' hidden' ?>>No live metrics yet — enable the real-time backend (DEPLOYMENT.md Part&nbsp;6) or wait for the next check-in.</p>
+</section>
 
 <div class="cols">
   <section class="card">

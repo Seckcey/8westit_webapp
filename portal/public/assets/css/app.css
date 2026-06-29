@@ -187,3 +187,23 @@ label.check input{width:auto;margin-top:3px}
 .login-brand .badge{margin:0 auto 10px;width:56px;height:56px;font-size:28px;border-radius:16px}
 .login-brand h1{margin:0;font-size:1.45rem;font-weight:700;letter-spacing:-.01em} .login-brand p{margin:3px 0 0;color:var(--slate);font-size:.85rem}
 .login-card button{width:100%;margin-top:8px}
+
+/* live metrics card (agent page) */
+.mp-live h3{display:flex;align-items:center}
+.mp-fresh{display:inline-block;margin-left:8px;padding:.14rem .55rem;border-radius:var(--r-pill);font-size:.68rem;
+  font-weight:700;text-transform:uppercase;letter-spacing:.03em;background:rgba(31,143,214,.16);color:var(--blue);vertical-align:middle}
+.mp-live h3 .dot{margin-left:8px}
+.mp-live-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px}
+.mp-tile{background:var(--surface-2);border:1px solid var(--line);border-radius:var(--r-md);padding:14px 16px}
+.mp-tile-label{color:var(--slate);font-size:.74rem;text-transform:uppercase;letter-spacing:.04em;font-weight:600}
+.mp-tile-val{font-size:1.5rem;font-weight:700;letter-spacing:-.01em;margin:4px 0 10px;display:flex;align-items:baseline;gap:3px}
+.mp-tile-nobar .mp-tile-val{margin-bottom:0}
+.mp-unit{font-size:.85rem;font-weight:600;color:var(--slate)}
+.mp-tile-val.mp-user{font-size:1.05rem;word-break:break-word}
+.mp-bar{height:6px;background:var(--line);border-radius:var(--r-pill);overflow:hidden}
+.mp-bar-fill{display:block;height:100%;border-radius:var(--r-pill);background:var(--blue);transition:width .4s ease}
+.mp-bar-fill[data-bar="cpu"]{background:var(--blue)}
+.mp-bar-fill[data-bar="mem"]{background:var(--amber)}
+.mp-bar-fill[data-bar="disk_c"]{background:var(--green)}
+.mp-fresh.mp-stale{background:rgba(216,162,0,.18);color:var(--amber)}
+.mp-live-hint{margin:14px 0 0}

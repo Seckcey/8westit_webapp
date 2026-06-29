@@ -246,10 +246,12 @@ You will paste this **identical** value in two places (they must be byte-for-byt
 
 ### 6.3 Portal side (HostGator)
 
-1. **Run the DB migration.** cPanel → **phpMyAdmin** → select your DB → **Import** →
-   `portal/db/migrations/2026-07-01_realtime_foundation.sql` → **Go**. (Optional: run the
-   §4.1 backfill from that file afterward.) All columns are additive/nullable — existing
-   polling reads none of them, so this changes no behavior on its own.
+1. **Run the DB migration.** cPanel → **phpMyAdmin** → select your DB
+   (`qygiabte_8westit_webapp`) → **Import** →
+   `portal/db/migrations/2026-06-30_phase1_realtime.sql` → **Go**. The one-time site
+   backfill is the last section of that same file, so there is nothing extra to run.
+   All columns are additive/nullable — existing polling reads none of them, so this
+   changes no behavior on its own.
    > MySQL 8 has no `ADD COLUMN IF NOT EXISTS`. If a re-run reports "Duplicate column name",
    > delete that one line and re-run — the rest is idempotent (`CREATE TABLE IF NOT EXISTS`).
 2. **Upload the new PHP files**: `portal/lib/svc_auth.php`, `portal/lib/policy.php`, and the
@@ -281,26 +283,34 @@ On the VPS, put the backend next to the relay (e.g. `/opt/milepost-rt`), copy th
    Then edit `.env` and set at minimum:
    ```ini
    PORT=8090
-   BIND=127.0.0.1                                  # localhost only — Caddy reaches it
+   BIND=127.0.0.1                                  # bare-metal default; the compose OVERRIDES this to 0.0.0.0 (see below)
    WS_PATH=/agent
    PORTAL_BASE_URL=https://support.8westit.com     # the portal origin (svc endpoints live under /api/svc/)
    MILEPOST_SERVICE_SECRET=<the 64-hex secret from 6.2>   # MUST equal portal service_secret
    ```
    The remaining keys (ping/hello timeouts, metrics cadences, throttles, SQLite path, log
    level) have safe defaults documented in `.env.sample`. **Never log tokens or secrets.**
-2. **Bring up the backend + Caddy.** The `docker-compose.snippet.yml` defines two services —
-   `milepost-rt` (the Node backend, bound to `127.0.0.1:8090`) and `caddy` (TLS on 80/443).
-   Merge it into your relay `docker-compose.yml`, or run it as its own stack alongside the
-   relay containers:
+   > Networking note: under Docker, Caddy runs in its own container, so the backend must
+   > listen on `0.0.0.0` *inside its container* for Caddy to reach it. The provided
+   > `docker-compose.snippet.yml` sets `BIND=0.0.0.0` as a per-container override and
+   > publishes **no host port**, so 8090 is never exposed on the VPS's public interface —
+   > only Caddy (over the shared `milepost` network) can reach it. The `.env` `BIND` value
+   > matters only for a bare-metal (non-Docker) run.
+2. **Bring up the backend + Caddy.** The `docker-compose.snippet.yml` defines two services on
+   a shared `milepost` network — `milepost-rt` (the Node backend; `BIND=0.0.0.0` in-container,
+   no published host port) and `caddy` (TLS on 80/443). Merge it into your relay
+   `docker-compose.yml`, or run it as its own stack alongside the relay containers:
    ```bash
    sudo docker compose up -d milepost-rt caddy
    sudo docker compose ps          # both should say "Up"
    ```
-   Caddy uses `realtime/deploy/Caddyfile`, which simply reverse-proxies `rt.8westit.com` →
-   `127.0.0.1:8090` (it forwards the WebSocket `Upgrade`/`Connection` headers automatically).
-   On an nginx box instead of Caddy, set `proxy_set_header Upgrade $http_upgrade;`,
-   `proxy_set_header Connection "upgrade";`, and keep `proxy_read_timeout 75s;` — **above** the
-   30 s ping interval so pings keep the socket alive.
+   Caddy uses `realtime/deploy/Caddyfile`, which reverse-proxies `rt.8westit.com` →
+   `milepost-rt:8090` (the compose **service name**, resolved by Docker's embedded DNS — not
+   `127.0.0.1`, which inside the Caddy container would be Caddy's own loopback). It forwards
+   the WebSocket `Upgrade`/`Connection` headers automatically. On an nginx box instead of
+   Caddy, proxy to the backend's reachable address and set
+   `proxy_set_header Upgrade $http_upgrade;`, `proxy_set_header Connection "upgrade";`, and
+   keep `proxy_read_timeout 75s;` — **above** the 30 s ping interval so pings keep the socket alive.
 
 ### 6.5 Firewall ports
 
@@ -309,7 +319,8 @@ The backend stays bound to **localhost**; only Caddy is public.
 sudo ufw allow 80/tcp          # Caddy — HTTP→HTTPS redirect + ACME
 sudo ufw allow 443/tcp         # Caddy — WSS + /internal/* (TLS)
 # 21115:21119/tcp + 21116/udp (RustDesk, from Part 2.4) stay as-is.
-# Do NOT open 8090 — it is bound to 127.0.0.1 and reached only by Caddy.
+# Do NOT publish/open 8090 — the compose publishes no host port for it; only Caddy reaches
+# it over the shared Docker network. (If you ever run the backend bare-metal, keep BIND=127.0.0.1.)
 # No DB port is opened anywhere; the backend has no DB client.
 ```
 Optionally restrict `/internal/*` to HostGator's egress IPs at the proxy (the shared secret

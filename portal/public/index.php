@@ -1,6 +1,7 @@
 <?php
 declare(strict_types=1);
 require_once __DIR__ . '/../lib/render.php';
+require_once __DIR__ . '/../lib/realtime.php';
 enforce_https();
 $user = require_login();
 
@@ -11,23 +12,36 @@ $rows = db()->query(
       ORDER BY c.name IS NULL, c.name, a.site, a.hostname'
 )->fetchAll();
 
-$total = count($rows); $online = 0;
-foreach ($rows as $r) if (agent_is_online($r)) $online++;
+// One batched presence read so the initial paint reflects real-time online status
+// (self-guards; [] when rt disabled / backend down — then we fall back to the heuristic).
+$allIds = array_map(static fn($r) => (int)$r['id'], $rows);
+$live = rt_enabled() ? rt_presence($allIds) : [];
 
-// Group: client -> site -> [agents]
+/** Online for a row, preferring live presence, falling back to the last_seen heuristic. */
+function row_online(array $r, array $live): bool {
+    $p = $live[(int)$r['id']] ?? null;
+    return $p !== null ? !empty($p['online']) : agent_is_online($r);
+}
+
+$total = count($rows); $online = 0;
+foreach ($rows as $r) if (row_online($r, $live)) $online++;
+
+// Group: client -> site -> [agents]. Precompute _online onto each row so agent_row()
+// can read it without changing its signature.
 $groups = [];
 foreach ($rows as $r) {
+    $r['_online'] = row_online($r, $live);
     $cn = $r['client_name'] ?? 'Unassigned';
     $site = (string)($r['site'] ?? '');
     if (!isset($groups[$cn])) $groups[$cn] = ['online' => 0, 'total' => 0, 'sites' => []];
     $groups[$cn]['sites'][$site][] = $r;
     $groups[$cn]['total']++;
-    if (agent_is_online($r)) $groups[$cn]['online']++;
+    if ($r['_online']) $groups[$cn]['online']++;
 }
 
 /** Render one agent row (shared markup so live-refresh JS can target it). */
 function agent_row(array $r): void {
-    $on = agent_is_online($r); ?>
+    $on = $r['_online'] ?? agent_is_online($r); ?>
     <tr>
       <td><span class="dot <?= $on ? 'dot-on' : 'dot-off' ?>"></span></td>
       <td><a href="agent.php?id=<?= (int)$r['id'] ?>"><?= e($r['display_name'] ?: $r['hostname']) ?></a></td>

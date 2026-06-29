@@ -89,4 +89,69 @@
         }).catch(function () {});
     }, 6000);
   }
+
+  // Live metrics poller on the agent detail page (updates the Live card tiles in place).
+  function fmtPct(v) { return String(Math.round(v * 10) / 10); }
+  function humanUptime(secs) {
+    var s = Math.max(0, Math.floor(secs));
+    var d = Math.floor(s / 86400);
+    var h = Math.floor((s % 86400) / 3600);
+    var m = Math.floor((s % 3600) / 60);
+    if (d > 0) return d + 'd ' + h + 'h';
+    if (h > 0) return h + 'h ' + m + 'm';
+    if (m > 0) return m + 'm';
+    return '<1m';
+  }
+  function humanAge(s) { // mirrors $fmtAge() in agent.php
+    s = Math.max(0, Math.floor(s));
+    if (s < 60) return s + 's ago';
+    if (s < 3600) return Math.floor(s / 60) + 'm ago';
+    if (s < 86400) return Math.floor(s / 3600) + 'h ago';
+    return Math.floor(s / 86400) + 'd ago';
+  }
+  function renderLive(box, d) {
+    // The tile grid is always present; just toggle the "no metrics yet" hint so a fresh
+    // agent's card becomes live in place (no reload) once data starts flowing.
+    var hint = box.querySelector('[data-live-empty]');
+    if (hint) hint.hidden = (d.source !== 'none');
+    ['cpu', 'mem', 'disk_c'].forEach(function (key) {
+      var v = d[key];
+      var has = (v !== null && v !== undefined);
+      var span = box.querySelector('[data-metric="' + key + '"]');
+      var unit = box.querySelector('[data-unit="' + key + '"]');
+      var bar = box.querySelector('[data-bar="' + key + '"]');
+      if (span) span.textContent = has ? fmtPct(v) : '—';
+      if (unit) unit.hidden = !has; // keep the "%" in sync with the value (no "— %" drift)
+      if (bar) bar.style.width = (has ? Math.max(0, Math.min(100, v)) : 0) + '%';
+    });
+    var u = box.querySelector('[data-metric="uptime"]');
+    if (u) u.textContent = (d.uptime_secs === null || d.uptime_secs === undefined) ? '—' : humanUptime(d.uptime_secs);
+    var us = box.querySelector('[data-metric="user"]');
+    if (us) us.textContent = d.logged_user ? d.logged_user : '—';
+    var dot = box.querySelector('[data-live-dot]');
+    if (dot) dot.className = 'dot ' + (d.online ? 'dot-on' : 'dot-off');
+    var f = box.querySelector('[data-live-fresh]');
+    if (f) {
+      var hb = parseInt(box.getAttribute('data-heartbeat'), 10) || 60;
+      var stale = false;
+      if (d.source === 'realtime') f.textContent = 'live';
+      else if (d.source === 'snapshot' && d.sampled_age_secs != null) {
+        f.textContent = 'as of ' + humanAge(d.sampled_age_secs);
+        stale = d.sampled_age_secs > Math.max(60, hb) * 2.5;
+      } else f.textContent = '—';
+      f.classList.toggle('mp-stale', stale);
+    }
+  }
+  var liveBox = document.querySelector('[data-agent-live]');
+  if (liveBox) {
+    var liveId = liveBox.getAttribute('data-agent-live');
+    var pull = function () {
+      fetch('agent_live.php?id=' + liveId, { credentials: 'same-origin' })
+        .then(function (r) { return r.json(); })
+        .then(function (d) { if (!d.ok) return; renderLive(liveBox, d); })
+        .catch(function () {});
+    };
+    pull();
+    setInterval(pull, 7000);
+  }
 })();
