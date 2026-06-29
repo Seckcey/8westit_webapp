@@ -64,6 +64,7 @@ $msi = Join-Path $distDir "EightWestAgent.msi"
 # wix build: -b adds bind paths so <File Source="..."> resolves (agent exe + bundled installer).
 # -d BundleRustDesk=1 includes the bundled client (direct builds are always self-contained).
 wix build $wxs -ext WixToolset.Util.wixext -d BundleRustDesk=1 -b "$binDir" -b "$root\installer" -o $msi
+if ($LASTEXITCODE -ne 0) { throw "wix build failed (exit $LASTEXITCODE) — see the WiX error above." }
 
 Write-Host "==> Built: $msi" -ForegroundColor Green
 

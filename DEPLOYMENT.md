@@ -312,6 +312,33 @@ On the VPS, put the backend next to the relay (e.g. `/opt/milepost-rt`), copy th
    `proxy_set_header Upgrade $http_upgrade;`, `proxy_set_header Connection "upgrade";`, and
    keep `proxy_read_timeout 75s;` — **above** the 30 s ping interval so pings keep the socket alive.
 
+### 6.4b — Alternative: behind an EXISTING nginx-proxy (e.g. a BTCPay host)
+If the VPS already runs a reverse proxy that owns 80/443 — common when the relay shares a
+box with **BTCPay Server** (jwilder `nginx-proxy` + `docker-gen` + acme-companion) — do **not**
+add Caddy (it would collide on 80/443). Instead use
+[`realtime/deploy/docker-compose.nginx-proxy.yml`](realtime/deploy/docker-compose.nginx-proxy.yml),
+which adds only the `milepost-rt` container to the existing proxy network and lets that proxy
+route + TLS-terminate `rt.8westit.com`. It modifies nothing BTCPay-owned and publishes no host port.
+
+1. Find the proxy's network: `docker inspect nginx --format '{{json .NetworkSettings.Networks}}'`
+   (btcpayserver-docker → usually `generated_default`). Put it in the compose's `networks.proxy.name`.
+2. Set `LETSENCRYPT_EMAIL` in the compose, create `../backend/.env` as in 6.4, then:
+   `docker compose -f docker-compose.nginx-proxy.yml up -d --build`.
+3. **Gotcha — `VIRTUAL_HOST_NAME` is required here.** BTCPay's `docker-gen` template nests the whole
+   vhost inside a `range … Env.VIRTUAL_HOST_NAME` loop, so a container with only `VIRTUAL_HOST` is
+   counted but **silently skipped** (no `server_name` emitted → requests hit the default `503`). The
+   compose sets both `VIRTUAL_HOST` (server_name) and `VIRTUAL_HOST_NAME` (upstream label) — keep both.
+4. If the vhost doesn't appear right after the container starts, nudge a regenerate (safe; it's the
+   proxy's normal behavior, no downtime): `docker kill -s HUP nginx-gen`, then confirm with
+   `docker exec nginx grep -c "server_name rt.8westit.com" /etc/nginx/conf.d/default.conf`.
+5. Issue the cert: `docker exec letsencrypt-nginx-proxy-companion /app/signal_le_service`, watch
+   `docker logs -f letsencrypt-nginx-proxy-companion` for it to install, then `curl -s https://rt.8westit.com/healthz`.
+6. `chown` the SQLite dir to the container user so the cache opens:
+   `chown -R 1000:1000 <repo>/realtime/backend/data` (the image runs as `node`, UID 1000).
+
+With this path, skip 6.5's `ufw` changes for 8090 — no new port is published; the existing proxy's
+80/443 are already open. Everything else (6.6 verify, 6.7 turn-on, 6.8 rollback) is unchanged.
+
 ### 6.5 Firewall ports
 
 The backend stays bound to **localhost**; only Caddy is public.

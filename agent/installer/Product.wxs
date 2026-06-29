@@ -17,16 +17,17 @@
      xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
 
   <!-- Default value baked into the ENROLLKEY property.
-       Normal build: empty (key supplied at install via msiexec ENROLLKEY=...).
-       Template build (build-templates.ps1): a 64-char placeholder the portal
-       byte-patches with the real key when serving a per-client download. -->
+       Direct build (build-agent.ps1): a 64-char placeholder; the real key is
+       supplied at install via msiexec ENROLLKEY=... (WiX 5 forbids an empty Value).
+       Template build (build-templates.ps1): passes its own matching placeholder
+       that the portal byte-patches with the real key on per-client download. -->
   <?ifndef EnrollDefault ?>
-    <?define EnrollDefault = "" ?>
+    <?define EnrollDefault = "8WESTIT-ENROLLKEY-PLACEHOLDER-0000000000000000000000000000000000" ?>
   <?endif?>
 
   <Package Name="Milepost Agent"
            Manufacturer="8 West IT, LLC"
-           Version="1.0.3.0"
+           Version="1.1.0.0"
            UpgradeCode="7B3F2A14-9C6E-4D2B-AE51-8F0C2D6A1E90"
            Compressed="yes"
            Scope="perMachine">

@@ -1,0 +1,49 @@
+# Milepost real-time backend — deploy BEHIND AN EXISTING nginx-proxy reverse proxy
+# (e.g. a BTCPay Server host, or any jwilder/nginx-proxy + acme-companion setup that
+# already owns ports 80/443). Use this INSTEAD of docker-compose.snippet.yml (Caddy).
+#
+# It adds ONLY the milepost-rt container, joined to the existing proxy's network, and
+# lets that proxy route + TLS-terminate rt.8westit.com. Nothing on the existing stack
+# is modified, and no host port is published.
+#
+# SET TWO HOST-SPECIFIC VALUES before running:
+#   1) networks.proxy.name  — the network your nginx-proxy and its targets share.
+#        Find it:  docker inspect nginx --format '{{json .NetworkSettings.Networks}}'
+#        (On btcpayserver-docker this is usually "generated_default".)
+#   2) LETSENCRYPT_EMAIL     — your email for the certificate.
+#
+# IMPORTANT (the gotcha that cost us an afternoon): btcpayserver's customized docker-gen
+# requires BOTH VIRTUAL_HOST (server_name) AND VIRTUAL_HOST_NAME (the upstream label).
+# Stock nginx-proxy needs only VIRTUAL_HOST, but BTCPay's template nests the entire vhost
+# inside a `range ... VIRTUAL_HOST_NAME` loop, so a container WITHOUT VIRTUAL_HOST_NAME is
+# silently skipped (counted, but no server block emitted -> default 503). Keep both set.
+#
+# Run:  docker compose -f docker-compose.nginx-proxy.yml up -d --build
+# Then, if the proxy doesn't pick it up immediately:  docker kill -s HUP nginx-gen
+# And to issue the cert:  docker exec letsencrypt-nginx-proxy-companion /app/signal_le_service
+services:
+  milepost-rt:
+    build: ../backend
+    container_name: milepost-rt
+    restart: unless-stopped
+    env_file: ../backend/.env          # PORT, PORTAL_BASE_URL, MILEPOST_SERVICE_SECRET, ...
+    environment:
+      BIND: "0.0.0.0"                  # listen on all interfaces INSIDE the container so the proxy can reach it
+      VIRTUAL_HOST: "rt.8westit.com"   # nginx server_name
+      VIRTUAL_HOST_NAME: "milepost-rt" # nginx upstream label (REQUIRED by btcpayserver/docker-gen)
+      VIRTUAL_PORT: "8090"             # container port the proxy forwards to
+      LETSENCRYPT_HOST: "rt.8westit.com"
+      LETSENCRYPT_EMAIL: "you@example.com"   # <-- set your email
+    expose:
+      - "8090"                         # visible to the proxy network only; NO host port published
+    volumes:
+      - ../backend/data:/app/data      # SQLite cache; chown the host dir to the container user (node = UID 1000)
+    read_only: true
+    tmpfs:
+      - /tmp
+    networks:
+      - proxy
+networks:
+  proxy:
+    external: true
+    name: generated_default            # <-- set to your nginx-proxy network (see header)
