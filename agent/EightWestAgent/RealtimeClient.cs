@@ -281,14 +281,79 @@ namespace EightWest.Agent
             }
         }
 
-        // The receive loop + a lightweight timer-by-polling for metrics cadence and
-        // the silence watchdog. We drive timing off Environment.TickCount so we don't
-        // need a separate timer thread fighting the single send gate.
+        // Receive and "cadence" (metrics + silence watchdog + outbox sweep) run as two
+        // INDEPENDENT loops. CRITICAL: never cancel the WebSocket ReceiveAsync to wake up for
+        // cadence — cancelling a ClientWebSocket receive ABORTS the socket (it transitions to
+        // Aborted). The old single-loop design bounded each receive with a 5 s CancelAfter,
+        // which aborted the connection ~5 s after every connect (close code 1006) and produced
+        // an endless connect/abort/reconnect loop. So the receive now blocks on the connection
+        // token only, and a separate ~1 s tick drives all sending.
         private async Task ServeLoop(CancellationToken ct)
+        {
+            using (var loopCts = CancellationTokenSource.CreateLinkedTokenSource(ct))
+            {
+                var receive = ReceiveLoop(loopCts.Token);
+                var cadence = CadenceLoop(loopCts.Token);
+                await Task.WhenAny(receive, cadence).ConfigureAwait(false);
+                loopCts.Cancel(); // whichever ended first, stop the other
+                try { await Task.WhenAll(receive, cadence).ConfigureAwait(false); }
+                catch { /* cancellation / already-handled close errors */ }
+            }
+        }
+
+        // Blocks on ReceiveAsync (NO abort-on-timeout) until a frame arrives, the server closes,
+        // or the connection is cancelled; dispatches each frame.
+        private async Task ReceiveLoop(CancellationToken ct)
         {
             var buf = new byte[16 * 1024];
             var msg = new System.IO.MemoryStream();
 
+            while (!ct.IsCancellationRequested && _ws.State == WebSocketState.Open)
+            {
+                WebSocketReceiveResult res;
+                msg.SetLength(0);
+                try
+                {
+                    do
+                    {
+                        res = await _ws.ReceiveAsync(new ArraySegment<byte>(buf), ct).ConfigureAwait(false);
+                        if (res.MessageType == WebSocketMessageType.Close)
+                        {
+                            Log.Info($"Realtime: server close {(int?)res.CloseStatus} {res.CloseStatusDescription}");
+                            await HandleServerClose(res).ConfigureAwait(false);
+                            return;
+                        }
+                        if (res.MessageType == WebSocketMessageType.Binary)
+                        {
+                            await SafeClose((WebSocketCloseStatus)1003, "binary").ConfigureAwait(false);
+                            return;
+                        }
+                        if (msg.Length + res.Count > MaxFrameBytes)
+                        {
+                            await SafeClose((WebSocketCloseStatus)1009, "too large").ConfigureAwait(false);
+                            return;
+                        }
+                        msg.Write(buf, 0, res.Count);
+                    }
+                    while (!res.EndOfMessage);
+                }
+                catch (OperationCanceledException) { return; }
+                catch (WebSocketException wex)
+                {
+                    Log.Warn("Realtime receive error: " + wex.Message);
+                    return;
+                }
+
+                MarkInbound();
+                var text = Encoding.UTF8.GetString(msg.GetBuffer(), 0, (int)msg.Length);
+                await HandleFrame(text, ct).ConfigureAwait(false);
+            }
+        }
+
+        // Metrics cadence, 45 s silence watchdog, and REST-fallback sweep on a ~1 s tick —
+        // entirely separate from the receive, so it never touches the socket's read.
+        private async Task CadenceLoop(CancellationToken ct)
+        {
             while (!ct.IsCancellationRequested && _ws.State == WebSocketState.Open)
             {
                 // Watchdog: 45 s of silence => dead socket.
@@ -309,57 +374,8 @@ namespace EightWest.Agent
                 // REST fallback sweep for results that have waited past the grace.
                 SweepOutboxFallback();
 
-                // Receive with a bounded timeout so the cadence/watchdog stay responsive.
-                WebSocketReceiveResult res;
-                msg.SetLength(0);
-                try
-                {
-                    using (var recvCts = CancellationTokenSource.CreateLinkedTokenSource(ct))
-                    {
-                        recvCts.CancelAfter(TimeSpan.FromSeconds(5));
-                        try
-                        {
-                            do
-                            {
-                                res = await _ws.ReceiveAsync(new ArraySegment<byte>(buf), recvCts.Token)
-                                               .ConfigureAwait(false);
-                                if (res.MessageType == WebSocketMessageType.Close)
-                                {
-                                    Log.Info($"Realtime: server close {(int?)res.CloseStatus} {res.CloseStatusDescription}");
-                                    await HandleServerClose(res).ConfigureAwait(false);
-                                    return;
-                                }
-                                if (res.MessageType == WebSocketMessageType.Binary)
-                                {
-                                    await SafeClose((WebSocketCloseStatus)1003, "binary").ConfigureAwait(false);
-                                    return;
-                                }
-                                if (msg.Length + res.Count > MaxFrameBytes)
-                                {
-                                    await SafeClose((WebSocketCloseStatus)1009, "too large").ConfigureAwait(false);
-                                    return;
-                                }
-                                msg.Write(buf, 0, res.Count);
-                            }
-                            while (!res.EndOfMessage);
-                        }
-                        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
-                        {
-                            // Receive timeout — loop back to drive cadence/watchdog.
-                            continue;
-                        }
-                    }
-                }
+                try { await Task.Delay(1000, ct).ConfigureAwait(false); }
                 catch (OperationCanceledException) { return; }
-                catch (WebSocketException wex)
-                {
-                    Log.Warn("Realtime receive error: " + wex.Message);
-                    return;
-                }
-
-                MarkInbound();
-                var text = Encoding.UTF8.GetString(msg.GetBuffer(), 0, (int)msg.Length);
-                await HandleFrame(text, ct).ConfigureAwait(false);
             }
         }
 
