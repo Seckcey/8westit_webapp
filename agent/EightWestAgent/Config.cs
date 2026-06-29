@@ -25,12 +25,29 @@ namespace EightWest.Agent
         // the registry/json string convention; parsed via RealtimeEnabledFlag.
         public string RealtimeEnabled { get; set; } = "1";
 
+        // --- Agent auto-update (local kill-switch) ---
+        // "0" disables self-update on this machine. Default on. The portal config is
+        // the real OFF-by-default gate; this is the local override. Parsed via
+        // AutoUpdateEnabledFlag. Auto-update happens only when BOTH this is true AND
+        // the portal advertises an "update" directive.
+        public string AutoUpdateEnabled { get; set; } = "1";
+
         /// <summary>True unless RealtimeEnabled is explicitly "0"/"false"/"no"/"off".</summary>
         public bool RealtimeEnabledFlag
         {
             get
             {
                 var v = (RealtimeEnabled ?? "1").Trim().ToLowerInvariant();
+                return v != "0" && v != "false" && v != "no" && v != "off";
+            }
+        }
+
+        /// <summary>True unless AutoUpdateEnabled is explicitly "0"/"false"/"no"/"off".</summary>
+        public bool AutoUpdateEnabledFlag
+        {
+            get
+            {
+                var v = (AutoUpdateEnabled ?? "1").Trim().ToLowerInvariant();
                 return v != "0" && v != "false" && v != "no" && v != "off";
             }
         }
@@ -56,6 +73,8 @@ namespace EightWest.Agent
                         // Only override the default if the value is actually present.
                         var re = key.GetValue("RealtimeEnabled") as string;
                         if (!string.IsNullOrEmpty(re)) cfg.RealtimeEnabled = re;
+                        var au = key.GetValue("AutoUpdateEnabled") as string;
+                        if (!string.IsNullOrEmpty(au)) cfg.AutoUpdateEnabled = au;
                     }
                 }
             }
@@ -76,6 +95,9 @@ namespace EightWest.Agent
                     // RealtimeEnabled: only take the file value when the registry didn't supply one.
                     if (cfg.RealtimeEnabled == "1" && !string.IsNullOrEmpty(fromFile.RealtimeEnabled))
                         cfg.RealtimeEnabled = fromFile.RealtimeEnabled;
+                    // AutoUpdateEnabled: same — file value only when the registry didn't supply one.
+                    if (cfg.AutoUpdateEnabled == "1" && !string.IsNullOrEmpty(fromFile.AutoUpdateEnabled))
+                        cfg.AutoUpdateEnabled = fromFile.AutoUpdateEnabled;
                 }
             }
             catch { /* ignore */ }

@@ -35,6 +35,12 @@ namespace EightWest.Agent
         // RealtimeUrl registry/json override takes precedence over this.
         private string _advertisedRtUrl = "";
 
+        // --- Agent auto-update ---
+        // The "update" directive the portal advertised this cycle (enroll/heartbeat),
+        // or null when absent. Consumed once per MainLoop iteration by Updater.MaybeUpdate
+        // and then cleared, so a no-update heartbeat clears any prior directive.
+        private Dictionary<string, object> _pendingUpdate;
+
         public void Start()
         {
             _thread = new Thread(Run) { IsBackground = true, Name = "EightWestAgentWorker" };
@@ -220,6 +226,10 @@ namespace EightWest.Agent
                 var advertised = Str(resp, "realtime_url");
                 if (!string.IsNullOrEmpty(advertised)) _advertisedRtUrl = advertised;
 
+                // The portal may advertise an "update" directive here too (old agents
+                // ignore the key). Stash it; MainLoop hands it to Updater once per cycle.
+                _pendingUpdate = resp.ContainsKey("update") ? resp["update"] as Dictionary<string, object> : null;
+
                 // A fresh token was just minted — let any halted RT client reconnect.
                 _rt?.NotifyTokenRotated();
 
@@ -265,6 +275,16 @@ namespace EightWest.Agent
                     // (migration step 4). If so, start RT now without re-enrolling.
                     if (_rt == null) StartRealtime();
 
+                    // Guarded self-update: if the portal advertised an "update" directive
+                    // (enroll or this heartbeat), hand it to the Updater once. It enforces
+                    // every guard and never throws. Consume-once: clear after handoff so a
+                    // no-update heartbeat clears any prior directive.
+                    if (_pendingUpdate != null)
+                    {
+                        Updater.MaybeUpdate(_pendingUpdate, _cfg, _state);
+                        _pendingUpdate = null;
+                    }
+
                     if ((DateTime.UtcNow - _lastInventory).TotalHours >= 6) SendInventory();
 
                     // Install + configure RustDesk in the background, retrying every 10 min
@@ -307,6 +327,10 @@ namespace EightWest.Agent
             // re-enrolling (old agents ignore the key).
             var advertised = Str(resp, "realtime_url");
             if (!string.IsNullOrEmpty(advertised)) _advertisedRtUrl = advertised;
+
+            // The portal advertises the "update" directive on heartbeat too. Overwrite each
+            // cycle (null when absent), so a no-update heartbeat clears any prior directive.
+            _pendingUpdate = resp.ContainsKey("update") ? resp["update"] as Dictionary<string, object> : null;
 
             return (int)Num(resp, "pending_jobs", 0);
         }

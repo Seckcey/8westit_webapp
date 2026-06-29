@@ -51,4 +51,36 @@ return [
         'agent_ws_url' => 'wss://rt.8westit.com/agent', // advertised to agents via enroll/heartbeat
         'dispatch_timeout_ms' => 4000,                 // portal HTTP timeout to the backend
     ],
+
+    // --- Agent auto-update (self-update / targeted push) ---
+    // HARD KILL-SWITCH — DEFAULT OFF. While 'enabled' is false OR 'target_version' is empty,
+    // resolve_agent_update() returns null and ZERO agents ever receive an "update" directive.
+    // Rollout: (1) upload the new agent-template-<variant>.msi to /installers; (2) set
+    // 'enabled' => true and 'target_version' to that MSI's version; (3) it now reaches ONLY the
+    // endpoints you CANARY — open an agent page and click "Update to latest" (sets that device's
+    // target_version) for one/a few machines; verify they upgrade and reconnect; (4) to roll the
+    // WHOLE fleet, set 'fleet_wide' => true (every endpoint below target_version then updates).
+    // Version-INCREASE-ONLY: agents only update when target > current. Recovery from a bad build
+    // is FIX-FORWARD (ship a higher good version) — there is no auto-rollback.
+    //
+    // KNOWN CAVEAT — placeholder EnrollKey after auto-update (fix-forward, not silent):
+    //   agent_update.php streams the UNPATCHED template MSI (download.php byte-patches the real
+    //   64-hex key; the auto-update path cannot, or the SHA-256 the agent verifies would not
+    //   match). The MajorUpgrade therefore REWRITES HKLM\SOFTWARE\8WestIT\Agent\EnrollKey back
+    //   to the build placeholder ('8WESTIT-ENROLLKEY-PLACEHOLDER-...'). This is harmless on the
+    //   normal path: identity + bearer token live in state.json (untouched by the MSI), so the
+    //   upgraded agent has IsEnrolled==true and never re-enrolls. BUT if that token is later
+    //   REVOKED/RESET (agent gets HTTP 401 -> it clears the token and tries Enroll() with the
+    //   registry EnrollKey), the placeholder fails enroll.php's /^[a-f0-9]{64}$/i check and the
+    //   endpoint cannot auto-re-enroll — it needs a MANUAL REINSTALL from download.php (which
+    //   re-patches the real key). So: do NOT reset/revoke an auto-updated agent's token expecting
+    //   it to self-recover. FAST-FOLLOW to remove this caveat: make the MSI preserve a real
+    //   EnrollKey instead of overwriting it with the placeholder (agent/installer/Product.wxs).
+    'agent_update' => [
+        'enabled'        => false,  // master gate; false = nobody updates
+        'target_version' => '',     // version of the uploaded template, e.g. '1.1.2'; empty = nobody updates
+        'variant'        => 'lite', // 'lite' | 'full' — which template MSI agents pull
+        'fleet_wide'     => false,  // false = CANARY (only endpoints opted in via the agent page);
+                                    // true = roll out to EVERY endpoint below target_version
+    ],
 ];

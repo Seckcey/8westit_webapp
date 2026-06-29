@@ -2,6 +2,7 @@
 declare(strict_types=1);
 require_once __DIR__ . '/../lib/render.php';
 require_once __DIR__ . '/../lib/realtime.php';
+require_once __DIR__ . '/../lib/update.php';
 enforce_https();
 $user = require_login();
 
@@ -74,6 +75,23 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
         db()->prepare('UPDATE agents SET display_name=?, client_id=? WHERE id=?')
             ->execute([$name, $cid, $id]);
         $flash = 'Saved.';
+    } elseif ($action === 'update_agent_version') {
+        // Targeted/canary push: set THIS agent's target_version to the global config target.
+        // High blast radius, so admin-only (other actions on this page are login-only). The
+        // heartbeat directive + resolver do the actual rollout; no job_type / no ENUM change.
+        if (($user['role'] ?? '') !== 'admin') {
+            $flash = 'Only admins can push agent updates.';
+        } else {
+            $au = cfg('agent_update', []);
+            $gt = trim((string)($au['target_version'] ?? ''));
+            if (empty($au['enabled']) || $gt === '') {
+                $flash = 'Auto-update is disabled or no global target is set.';
+            } else {
+                db()->prepare('UPDATE agents SET target_version=? WHERE id=?')->execute([$gt, $id]);
+                audit((int)$user['id'], $id, 'update_agent_version', 'target=' . $gt);
+                $flash = 'Update to ' . $gt . ' queued for this endpoint.';
+            }
+        }
     } elseif ($action === 'archive') {
         db()->prepare('UPDATE agents SET is_archived=1 WHERE id=?')->execute([$id]);
         audit((int)$user['id'], $id, 'archive', '');
@@ -163,6 +181,21 @@ $liveStale  = ($liveSrc === 'snapshot' && $liveAge !== null && $liveAge > $stale
 
 $online = agent_is_online($agent);
 $csrf = csrf_token();
+
+// ── Auto-update / targeted-push state for the System card.
+$au           = cfg('agent_update', []);
+$auEnabled    = !empty($au['enabled']);
+$globalTarget = trim((string)($au['target_version'] ?? ''));
+$curVer       = (string)($agent['agent_version'] ?? '');
+$devTarget    = trim((string)($agent['target_version'] ?? ''));
+$isAdmin      = (($user['role'] ?? '') === 'admin');
+// "update pending" = this device has a per-device target ahead of its current version.
+$updatePending = ($devTarget !== '' && version_compare($devTarget, $curVer === '' ? '0' : $curVer, '>'));
+// The button is shown only when an admin can actually act: feature on, a global target set,
+// and that global target is strictly newer than what this agent is currently running.
+$canPushUpdate = $isAdmin && $auEnabled && $globalTarget !== ''
+    && version_compare($globalTarget, $curVer === '' ? '0' : $curVer, '>');
+
 layout_header($agent['display_name'] ?: $agent['hostname'], $user);
 ?>
 <div class="page-head">
@@ -226,9 +259,28 @@ layout_header($agent['display_name'] ?: $agent['hostname'], $user);
       <dt>OS</dt><dd><?= e($agent['os_name']) ?> <?= e($agent['os_version']) ?></dd>
       <dt>Public IP</dt><dd><?= e($agent['public_ip'] ?: '—') ?></dd>
       <dt>Local IP</dt><dd><?= e($agent['local_ip'] ?: '—') ?></dd>
-      <dt>Agent ver.</dt><dd><?= e($agent['agent_version'] ?: '—') ?></dd>
+      <dt>Agent ver.</dt><dd>
+        <?= e($curVer ?: '—') ?>
+        <?php if ($auEnabled && $globalTarget !== ''): ?>
+          <?php if ($updatePending): ?>
+            <span class="tag tag-queued">update pending → <?= e($devTarget) ?></span>
+          <?php elseif (version_compare($globalTarget, $curVer === '' ? '0' : $curVer, '>')): ?>
+            <span class="muted small">target <?= e($globalTarget) ?></span>
+          <?php else: ?>
+            <span class="muted small">up to date</span>
+          <?php endif; ?>
+        <?php endif; ?>
+      </dd>
       <dt>RustDesk ID</dt><dd><?= e($agent['rustdesk_id'] ?: 'not reported') ?></dd>
     </dl>
+    <?php if ($canPushUpdate): ?>
+    <form method="post" class="inline-form" onsubmit="return confirm('Push agent update to <?= e($globalTarget) ?> on this endpoint?');">
+      <input type="hidden" name="csrf" value="<?= e($csrf) ?>">
+      <input type="hidden" name="action" value="update_agent_version">
+      <button class="btn-sm btn-primary">Update to latest (<?= e($globalTarget) ?>)</button>
+      <p class="muted small">Sets this endpoint's target version. It self-updates on its next check-in.</p>
+    </form>
+    <?php endif; ?>
     <form method="post" class="inline-form">
       <input type="hidden" name="csrf" value="<?= e($csrf) ?>">
       <input type="hidden" name="action" value="update_agent">

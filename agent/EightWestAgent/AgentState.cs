@@ -38,6 +38,27 @@ namespace EightWest.Agent
         public string AuthToken { get; set; } = "";
         public string RustDeskPassword { get; set; } = "";
 
+        /// <summary>
+        /// Auto-update backoff bookkeeping (bounds crash-loops). The target version of
+        /// the most recent self-update attempt and when it was launched (ISO-8601 "o"
+        /// round-trip string, NOT a DateTime, to avoid JavaScriptSerializer's /Date()/
+        /// format). The same target is never retried within the backoff window.
+        /// </summary>
+        public string LastUpdateAttemptVersion { get; set; } = "";
+        public string LastUpdateAttemptAtUtc { get; set; } = "";
+
+        /// <summary>
+        /// Download/verification-failure backoff (distinct from a launched-attempt backoff).
+        /// A SHA-256 mismatch or truncated download does NOT mean the target build is bad —
+        /// it can be a transient bad byte, an intercepting proxy/AV, or a corrupt template.
+        /// We back off the SAME target on a SHORT escalating window (see ShouldSkipUpdateForVerifyBackoff)
+        /// keyed on consecutive failures, so a persistent mismatch can never re-download the
+        /// full MSI every heartbeat, while a one-off bad byte still retries quickly.
+        /// </summary>
+        public string LastVerifyFailVersion { get; set; } = "";
+        public string LastVerifyFailAtUtc { get; set; } = "";
+        public int VerifyFailCount { get; set; } = 0;
+
         /// <summary>job_ids already executed (idempotency LRU). Oldest first.</summary>
         public List<int> SeenJobIds { get; set; } = new List<int>();
 
@@ -45,6 +66,10 @@ namespace EightWest.Agent
         public List<PendingResult> ResultOutbox { get; set; } = new List<PendingResult>();
 
         private const int SeenJobIdCap = 256;
+
+        // Guards the auto-update bookkeeping fields. A private field, so the
+        // JavaScriptSerializer skips it (never leaks into state.json; no [ScriptIgnore]).
+        private readonly object _updateLock = new object();
 
         private static string Dir =>
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
@@ -127,6 +152,103 @@ namespace EightWest.Agent
                 if (ResultOutbox.RemoveAll(x => x.JobId == jobId) == 0) return;
             }
             SafeSave();
+        }
+
+        /* ---------- auto-update backoff (thread-safe) ---------- */
+
+        /// <summary>
+        /// Record a self-update attempt for <paramref name="version"/> at UtcNow, then
+        /// persist. Called BEFORE launching msiexec so a crash-loop is bounded: the same
+        /// target is suppressed by <see cref="ShouldSkipUpdateForBackoff"/> within the window.
+        /// </summary>
+        public void RecordUpdateAttempt(string version)
+        {
+            lock (_updateLock)
+            {
+                LastUpdateAttemptVersion = version ?? "";
+                LastUpdateAttemptAtUtc = DateTime.UtcNow.ToString("o");
+            }
+            SafeSave();
+        }
+
+        /// <summary>
+        /// True when the SAME target version was last attempted within
+        /// <paramref name="window"/> — used to skip retrying a failing update too soon.
+        /// A different target, an unparseable timestamp, or an expired window → false.
+        /// </summary>
+        public bool ShouldSkipUpdateForBackoff(string target, TimeSpan window)
+        {
+            lock (_updateLock)
+            {
+                if (!string.Equals(LastUpdateAttemptVersion, target, StringComparison.OrdinalIgnoreCase))
+                    return false;
+                if (!DateTime.TryParse(LastUpdateAttemptAtUtc, null,
+                        System.Globalization.DateTimeStyles.RoundtripKind, out var t))
+                    return false;
+                return (DateTime.UtcNow - t) < window;
+            }
+        }
+
+        /// <summary>
+        /// Record a download/verification FAILURE for <paramref name="version"/> (SHA-256
+        /// mismatch or truncated download). Increments the consecutive-failure counter when
+        /// the target is unchanged, else resets it to 1. Persists. This is what bounds the
+        /// "re-download every 60s forever" loop on a persistent mismatch.
+        /// </summary>
+        public void RecordVerifyFailure(string version)
+        {
+            lock (_updateLock)
+            {
+                if (string.Equals(LastVerifyFailVersion, version, StringComparison.OrdinalIgnoreCase))
+                    VerifyFailCount = VerifyFailCount < int.MaxValue ? VerifyFailCount + 1 : VerifyFailCount;
+                else
+                    VerifyFailCount = 1;
+                LastVerifyFailVersion = version ?? "";
+                LastVerifyFailAtUtc = DateTime.UtcNow.ToString("o");
+            }
+            SafeSave();
+        }
+
+        /// <summary>
+        /// Reset the verification-failure backoff (e.g. once a download verifies cleanly), so a
+        /// later transient failure starts a fresh quick-retry cycle.
+        /// </summary>
+        public void ResetVerifyFailure()
+        {
+            lock (_updateLock)
+            {
+                if (VerifyFailCount == 0 && LastVerifyFailVersion.Length == 0) return;
+                LastVerifyFailVersion = "";
+                LastVerifyFailAtUtc = "";
+                VerifyFailCount = 0;
+            }
+            SafeSave();
+        }
+
+        /// <summary>
+        /// True when the SAME target recently FAILED verification and we are still inside its
+        /// escalating backoff window. The window grows with the consecutive-failure count
+        /// (capped) so a one-off bad byte retries within ~<paramref name="baseWindow"/> while a
+        /// persistent mismatch quickly backs off to <paramref name="maxWindow"/> — never a
+        /// per-heartbeat re-download. A different target → false (fresh target gets a free try).
+        /// </summary>
+        public bool ShouldSkipUpdateForVerifyBackoff(string target, TimeSpan baseWindow, TimeSpan maxWindow)
+        {
+            lock (_updateLock)
+            {
+                if (VerifyFailCount <= 0) return false;
+                if (!string.Equals(LastVerifyFailVersion, target, StringComparison.OrdinalIgnoreCase))
+                    return false;
+                if (!DateTime.TryParse(LastVerifyFailAtUtc, null,
+                        System.Globalization.DateTimeStyles.RoundtripKind, out var t))
+                    return false;
+
+                // Escalate: window = baseWindow * 2^(failures-1), capped at maxWindow.
+                double mult = Math.Pow(2, Math.Min(VerifyFailCount - 1, 10));
+                var ticks = (long)Math.Min(baseWindow.Ticks * mult, (double)maxWindow.Ticks);
+                var window = TimeSpan.FromTicks(ticks);
+                return (DateTime.UtcNow - t) < window;
+            }
         }
 
         private void SafeSave()

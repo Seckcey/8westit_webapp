@@ -11,6 +11,7 @@
 declare(strict_types=1);
 require_once __DIR__ . '/../../lib/auth.php';
 require_once __DIR__ . '/../../lib/realtime.php';
+require_once __DIR__ . '/../../lib/update.php';
 enforce_https();
 
 if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') json_err('POST required', 405);
@@ -98,4 +99,16 @@ $resp = [
 // Old agents ignore this unknown key (spec §7.1).
 $ws = rt_agent_ws_url();
 if ($ws !== '') $resp['realtime_url'] = $ws;
+
+// Auto-update directive (off by default). enroll has no agent row loaded — re-SELECT so a
+// re-enrolling device keeps its previously-set per-device target_version. Old agents ignore
+// this unknown key.
+$arStmt = $pdo->prepare('SELECT id, agent_version, target_version FROM agents WHERE id = ?');
+$arStmt->execute([$agentId]);
+$agentRow = $arStmt->fetch();
+if ($agentRow) {
+    $upd = resolve_agent_update($agentRow);
+    if ($upd !== null) $resp['update'] = $upd;
+}
+
 json_out($resp);

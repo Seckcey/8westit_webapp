@@ -9,6 +9,7 @@
 declare(strict_types=1);
 require_once __DIR__ . '/../../lib/auth.php';
 require_once __DIR__ . '/../../lib/realtime.php';
+require_once __DIR__ . '/../../lib/update.php';
 enforce_https();
 
 if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') json_err('POST required', 405);
@@ -41,4 +42,16 @@ $resp = ['ok' => true, 'pending_jobs' => $pending];
 // change. Old agents ignore this unknown key (spec §7.1).
 $ws = rt_agent_ws_url();
 if ($ws !== '') $resp['realtime_url'] = $ws;
+
+// Auto-update directive (off by default). Pass the FRESHLY-reported $ver as the current
+// version, NOT $agent['agent_version'] — require_agent() SELECTed the row before the UPDATE
+// above ran, so $agent['agent_version'] can be one cycle stale; using it would re-advertise
+// the update the agent just installed and loop it. Old agents ignore this unknown key.
+$upd = resolve_agent_update([
+    'id'             => $agent['id'],
+    'agent_version'  => $ver,
+    'target_version' => $agent['target_version'] ?? null,
+]);
+if ($upd !== null) $resp['update'] = $upd;
+
 json_out($resp);

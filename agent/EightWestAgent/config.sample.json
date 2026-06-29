@@ -3,5 +3,6 @@
   "EnrollKey": "PASTE_A_64_HEX_ENROLLMENT_KEY_FROM_THE_PORTAL",
   "RustDeskUrl": "",
   "RealtimeUrl": "",
-  "RealtimeEnabled": "1"
+  "RealtimeEnabled": "1",
+  "AutoUpdateEnabled": "1"
 }
