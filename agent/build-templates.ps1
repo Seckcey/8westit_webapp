@@ -64,6 +64,19 @@ foreach ($m in @($fullMsi, $liteMsi)) {
   Write-Host ("    {0}  {1} MB  (placeholder OK)" -f (Split-Path $m -Leaf), [math]::Round((Get-Item $m).Length/1MB,1)) -ForegroundColor Green
 }
 
+# Version-stamped COPIES so you can tell builds apart locally.
+# IMPORTANT: the portal serves the UNVERSIONED names (download.php + agent_update.php hardcode
+# agent-template-<variant>.msi), so ALWAYS upload the unversioned files. The -<version> copies
+# are reference/archive only.
+$ver = (Get-Item (Join-Path $binDir "EightWestAgent.exe")).VersionInfo.ProductVersion
+$ver = (($ver -split '\+')[0]).Trim()
+foreach ($m in @($fullMsi, $liteMsi)) {
+  $vName = [IO.Path]::GetFileNameWithoutExtension($m) + "-v$ver.msi"
+  Copy-Item $m (Join-Path $outDir $vName) -Force
+  Write-Host ("    + versioned copy: $vName") -ForegroundColor Gray
+}
+
 Write-Host ""
-Write-Host "==> Templates built in: $outDir" -ForegroundColor Green
-Write-Host "    Upload BOTH .msi files to the portal at  public_html/8westit/installers/" -ForegroundColor Yellow
+Write-Host "==> Templates built in: $outDir  (agent version $ver)" -ForegroundColor Green
+Write-Host "    UPLOAD the unversioned files (agent-template-lite.msi / -full.msi) to" -ForegroundColor Yellow
+Write-Host "    public_html/8westit/installers/ — the -v$ver copies are just local reference." -ForegroundColor Yellow
