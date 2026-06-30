@@ -52,10 +52,12 @@ $liteMsi = Join-Path $outDir "agent-template-lite.msi"
 Write-Host "==> Building FULL template (RustDesk bundled)" -ForegroundColor Cyan
 wix build $wxs -ext WixToolset.Util.wixext -d BundleRustDesk=1 "-d" "EnrollDefault=$placeholder" `
   -b "$binDir" -b "$instDir" -o $fullMsi
+if ($LASTEXITCODE -ne 0) { throw "wix build (full template) failed (exit $LASTEXITCODE) — see the WiX error above." }
 
 Write-Host "==> Building LITE template (no bundle)" -ForegroundColor Cyan
 wix build $wxs -ext WixToolset.Util.wixext "-d" "EnrollDefault=$placeholder" `
   -b "$binDir" -b "$instDir" -o $liteMsi
+if ($LASTEXITCODE -ne 0) { throw "wix build (lite template) failed (exit $LASTEXITCODE) — see the WiX error above." }
 
 # Sanity: confirm the placeholder is actually present in each MSI so the portal can patch it.
 foreach ($m in @($fullMsi, $liteMsi)) {

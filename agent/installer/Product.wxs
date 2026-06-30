@@ -50,9 +50,8 @@
       <RegistrySearch Id="rsExistingEnrollKey" Root="HKLM" Key="SOFTWARE\8WestIT\Agent"
                       Name="EnrollKey" Type="raw" />
     </Property>
-    <SetProperty Id="ENROLLKEY" Value="[EXISTINGENROLLKEY]" After="AppSearch" Sequence="both">
-      <![CDATA[ EXISTINGENROLLKEY AND ENROLLKEY = "$(EnrollDefault)" ]]>
-    </SetProperty>
+    <SetProperty Id="ENROLLKEY" Value="[EXISTINGENROLLKEY]" After="AppSearch" Sequence="both"
+                 Condition='EXISTINGENROLLKEY AND ENROLLKEY = "$(EnrollDefault)"' />
 
     <Feature Id="MainFeature" Title="Agent">
       <ComponentGroupRef Id="AgentComponents" />
