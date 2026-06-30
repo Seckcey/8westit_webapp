@@ -27,7 +27,7 @@
 
   <Package Name="Milepost Agent"
            Manufacturer="8 West IT, LLC"
-           Version="1.1.5.0"
+           Version="1.1.6.0"
            UpgradeCode="7B3F2A14-9C6E-4D2B-AE51-8F0C2D6A1E90"
            Compressed="yes"
            Scope="perMachine">
@@ -47,8 +47,11 @@
          is the placeholder — so fresh installs via download.php (real byte-patched key, != placeholder)
          and `msiexec ENROLLKEY=<real>` are unaffected. -->
     <Property Id="EXISTINGENROLLKEY" Secure="yes">
+      <!-- Bitness MUST be always64: cmpRegConfig writes EnrollKey to the 64-bit hive, so the
+           search has to read there too (the default 32-bit view / WOW6432Node is empty, which
+           silently broke the preserve in 1.1.4/1.1.5). -->
       <RegistrySearch Id="rsExistingEnrollKey" Root="HKLM" Key="SOFTWARE\8WestIT\Agent"
-                      Name="EnrollKey" Type="raw" />
+                      Name="EnrollKey" Type="raw" Bitness="always64" />
     </Property>
     <SetProperty Id="ENROLLKEY" Value="[EXISTINGENROLLKEY]" After="AppSearch" Sequence="both"
                  Condition='EXISTINGENROLLKEY AND ENROLLKEY = "$(EnrollDefault)"' />
