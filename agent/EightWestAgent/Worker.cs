@@ -14,7 +14,7 @@ namespace EightWest.Agent
     /// </summary>
     public class Worker
     {
-        public const string Version = "1.1.4";
+        public const string Version = "1.1.5";
 
         private readonly ManualResetEvent _stop = new ManualResetEvent(false);
         private Thread _thread;
