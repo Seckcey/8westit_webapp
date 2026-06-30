@@ -27,7 +27,7 @@
 
   <Package Name="Milepost Agent"
            Manufacturer="8 West IT, LLC"
-           Version="1.1.3.0"
+           Version="1.1.4.0"
            UpgradeCode="7B3F2A14-9C6E-4D2B-AE51-8F0C2D6A1E90"
            Compressed="yes"
            Scope="perMachine">
@@ -38,6 +38,21 @@
     <!-- Supplied on the msiexec command line (or baked in by the build script). -->
     <Property Id="ENROLLKEY" Secure="yes" Value="$(EnrollDefault)" />
     <Property Id="PORTAL" Secure="yes" Value="https://support.8westit.com" />
+
+    <!-- Preserve an existing real EnrollKey across an UNPATCHED upgrade. The auto-update path
+         streams the template MSI whose ENROLLKEY is the build placeholder (it can't be byte-patched
+         or the agent's SHA-256 check would fail). Without this, a MajorUpgrade would overwrite a
+         real registry EnrollKey with the placeholder, orphaning the agent if its token is later
+         reset. We read any existing key, and only override ENROLLKEY with it when the INCOMING key
+         is the placeholder — so fresh installs via download.php (real byte-patched key, != placeholder)
+         and `msiexec ENROLLKEY=<real>` are unaffected. -->
+    <Property Id="EXISTINGENROLLKEY" Secure="yes">
+      <RegistrySearch Id="rsExistingEnrollKey" Root="HKLM" Key="SOFTWARE\8WestIT\Agent"
+                      Name="EnrollKey" Type="raw" />
+    </Property>
+    <SetProperty Id="ENROLLKEY" Value="[EXISTINGENROLLKEY]" After="AppSearch" Sequence="both">
+      <![CDATA[ EXISTINGENROLLKEY AND ENROLLKEY = "$(EnrollDefault)" ]]>
+    </SetProperty>
 
     <Feature Id="MainFeature" Title="Agent">
       <ComponentGroupRef Id="AgentComponents" />
