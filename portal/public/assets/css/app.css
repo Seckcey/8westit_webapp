@@ -208,3 +208,28 @@ label.check input{width:auto;margin-top:3px}
 .mp-bar-fill[data-bar="disk_c"]{background:var(--green)}
 .mp-fresh.mp-stale{background:rgba(216,162,0,.18);color:var(--amber)}
 .mp-live-hint{margin:14px 0 0}
+
+/* performance history chart (agent page) */
+.mp-chart-card h3{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.mp-range{display:inline-flex;gap:4px}
+.mp-range button{border:1px solid var(--line);background:var(--surface-2);color:var(--slate);
+  border-radius:var(--r-pill);padding:4px 13px;font-size:.78rem;font-weight:600;cursor:pointer;
+  font-family:inherit;transition:background .15s ease,color .15s ease}
+.mp-range button:hover{background:var(--surface-hover)}
+.mp-range button.active{background:var(--ink);color:var(--surface);border-color:var(--ink)}
+.mp-legend{display:flex;flex-wrap:wrap;gap:18px;margin:2px 0 12px}
+.mp-leg{display:inline-flex;align-items:center;gap:7px;font-size:.84rem;color:var(--slate)}
+.mp-leg b{color:var(--ink);font-weight:700;font-variant-numeric:tabular-nums}
+.mp-leg .dot{width:9px;height:9px}
+.mp-leg-cpu .dot{background:var(--blue)} .mp-leg-mem .dot{background:var(--amber)} .mp-leg-disk_pct .dot{background:var(--green)}
+.mp-chart{aspect-ratio:720/220} /* reserve space so the async chart load causes no layout shift */
+.mp-chart svg{width:100%;height:auto;display:block}
+.mp-line{fill:none;stroke-width:2;vector-effect:non-scaling-stroke;stroke-linejoin:round;stroke-linecap:round}
+.mp-grid{stroke:var(--line);stroke-width:1}
+.mp-axis{fill:var(--slate);font-size:10px}
+.mp-extras{display:flex;flex-wrap:wrap;gap:10px;margin-top:14px}
+.mp-extra{display:inline-flex;align-items:center;gap:8px;background:var(--surface-2);border:1px solid var(--line);
+  border-radius:var(--r-pill);padding:5px 13px;font-size:.82rem}
+.mp-extra-k{color:var(--slate);font-weight:600}
+.mp-extra b{color:var(--ink);font-weight:700;font-variant-numeric:tabular-nums}
+.mp-chart-empty{margin:6px 0 0}

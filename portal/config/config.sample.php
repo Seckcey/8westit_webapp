@@ -63,24 +63,36 @@ return [
     // Version-INCREASE-ONLY: agents only update when target > current. Recovery from a bad build
     // is FIX-FORWARD (ship a higher good version) — there is no auto-rollback.
     //
-    // KNOWN CAVEAT — placeholder EnrollKey after auto-update (fix-forward, not silent):
-    //   agent_update.php streams the UNPATCHED template MSI (download.php byte-patches the real
-    //   64-hex key; the auto-update path cannot, or the SHA-256 the agent verifies would not
-    //   match). The MajorUpgrade therefore REWRITES HKLM\SOFTWARE\8WestIT\Agent\EnrollKey back
-    //   to the build placeholder ('8WESTIT-ENROLLKEY-PLACEHOLDER-...'). This is harmless on the
-    //   normal path: identity + bearer token live in state.json (untouched by the MSI), so the
-    //   upgraded agent has IsEnrolled==true and never re-enrolls. BUT if that token is later
-    //   REVOKED/RESET (agent gets HTTP 401 -> it clears the token and tries Enroll() with the
-    //   registry EnrollKey), the placeholder fails enroll.php's /^[a-f0-9]{64}$/i check and the
-    //   endpoint cannot auto-re-enroll — it needs a MANUAL REINSTALL from download.php (which
-    //   re-patches the real key). So: do NOT reset/revoke an auto-updated agent's token expecting
-    //   it to self-recover. FAST-FOLLOW to remove this caveat: make the MSI preserve a real
-    //   EnrollKey instead of overwriting it with the placeholder (agent/installer/Product.wxs).
+    // EnrollKey PRESERVED across auto-update (was a caveat through 1.1.5; fixed + validated live 1.1.6 -> 1.1.7):
+    //   agent_update.php still streams the UNPATCHED template MSI (download.php byte-patches the real
+    //   64-hex key; the auto-update path cannot, or the SHA-256 the agent verifies would not match), so
+    //   that MSI carries the build placeholder ('8WESTIT-ENROLLKEY-PLACEHOLDER-...') in its ENROLLKEY.
+    //   But the installer no longer clobbers a real registry key with it: Product.wxs runs a
+    //   RegistrySearch (Property EXISTINGENROLLKEY, Bitness="always64" so it reads the 64-bit hive that
+    //   cmpRegConfig writes) plus a SetProperty that overrides ENROLLKEY with the existing key ONLY when
+    //   the incoming key is the placeholder. So a MajorUpgrade keeps HKLM\SOFTWARE\8WestIT\Agent\EnrollKey
+    //   intact, while fresh installs from download.php (real byte-patched key) and
+    //   `msiexec ENROLLKEY=<real>` are unaffected (their key != placeholder). On the normal path nothing
+    //   re-enrolls anyway: identity + bearer token live in state.json (untouched by the MSI). And it is now
+    //   SAFE to reset/revoke an auto-updated agent's token — on the next HTTP 401 it clears the token and
+    //   re-enrolls with its real registry EnrollKey, which passes enroll.php's /^[a-f0-9]{64}$/i check (no
+    //   manual reinstall from download.php needed).
     'agent_update' => [
         'enabled'        => false,  // master gate; false = nobody updates
         'target_version' => '',     // version of the uploaded template, e.g. '1.1.2'; empty = nobody updates
         'variant'        => 'lite', // 'lite' | 'full' — which template MSI agents pull
         'fleet_wide'     => false,  // false = CANARY (only endpoints opted in via the agent page);
                                     // true = roll out to EVERY endpoint below target_version
+    ],
+
+    // --- Telemetry / time-series store (Phase 2) ---
+    // Retention windows for the metric history maintained by the cron (cron/metrics_rollup.php,
+    // run e.g. every 15 min). This whole block is OPTIONAL — the defaults below apply when it is
+    // absent. The values MUST satisfy raw_days < hour_days < day_days; the cron refuses to run on
+    // an inverted config so it can never prune an aggregate before the tier that feeds it.
+    'telemetry' => [
+        'raw_days'  => 14,   // 1/min raw samples (powers the 6h/24h/7d device charts)
+        'hour_days' => 90,   // hourly rollups
+        'day_days'  => 730,  // daily rollups (~2 years)
     ],
 ];

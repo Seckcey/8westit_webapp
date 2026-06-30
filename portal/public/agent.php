@@ -9,7 +9,7 @@ $user = require_login();
 $id = (int)($_GET['id'] ?? 0);
 $stmt = db()->prepare(
     'SELECT a.*, c.name AS client_name FROM agents a
-       LEFT JOIN clients c ON c.id = a.client_id WHERE a.id = ?'
+       LEFT JOIN clients c ON c.id = a.client_id WHERE a.id = ? AND a.is_archived = 0'
 );
 $stmt->execute([$id]);
 $agent = $stmt->fetch();
@@ -246,6 +246,20 @@ layout_header($agent['display_name'] ?: $agent['hostname'], $user);
     </div>
   </div>
   <p class="muted small mp-live-hint" data-live-empty<?= $liveSrc === 'none' ? '' : ' hidden' ?>>No live metrics yet — enable the real-time backend (DEPLOYMENT.md Part&nbsp;6) or wait for the next check-in.</p>
+</section>
+
+<section class="card mp-chart-card" data-metric-history="<?= $id ?>">
+  <h3>Performance
+    <span class="mp-range" role="group" aria-label="Time range">
+      <button type="button" data-range="6h" aria-pressed="false">6h</button>
+      <button type="button" data-range="24h" class="active" aria-pressed="true">24h</button>
+      <button type="button" data-range="7d" aria-pressed="false">7d</button>
+    </span>
+  </h3>
+  <div class="mp-legend" data-chart-legend></div>
+  <div class="mp-chart" data-chart-canvas></div>
+  <div class="mp-extras" data-chart-extras hidden></div>
+  <p class="muted small mp-chart-empty" data-chart-empty hidden>No performance history yet — samples accrue about once a minute while the agent is online.</p>
 </section>
 
 <div class="cols">

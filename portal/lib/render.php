@@ -4,7 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/auth.php';
 
 /** Cache-busting version for static assets. Hand-bump on css/js changes. */
-if (!defined('MP_ASSET_VER')) define('MP_ASSET_VER', '20260629b');
+if (!defined('MP_ASSET_VER')) define('MP_ASSET_VER', '20260701b');
 
 /** Online if seen within 2.5x its heartbeat interval. */
 function agent_is_online(array $a): bool

@@ -133,6 +133,10 @@ class LiveStore {
       ent.last_user = m.logged_user;
     }
     if (m.local_ip !== undefined) ent.local_ip = m.local_ip;
+    // Phase 2: the wider metric set rides a generic `series` array ([{k,i,v},...]). The backend
+    // carries it opaquely — latest-only, in memory (lossy, never cached to SQLite) — and forwards
+    // it in the throttled snapshot so the portal can append each tuple to the time-series store.
+    if (Array.isArray(m.series)) ent.series = m.series;
     this.presence.set(agentId, ent);
 
     if (this.db) {
@@ -209,6 +213,9 @@ class LiveStore {
           mem: ent.mem ?? null,
           disk_c: ent.disk_c ?? null,
           uptime_secs: ent.uptime_secs ?? null,
+          // Forward the wider metric set when present; omitted (undefined → dropped by JSON) for
+          // agents that don't send it (e.g. pre-1.1.8 agents), so the snapshot shape is unchanged.
+          ...(Array.isArray(ent.series) && ent.series.length ? { series: ent.series } : {}),
         });
         ent.last_snapshot_at = nowSec;
       } else if (ent.pendingOffline) {

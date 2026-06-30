@@ -154,4 +154,164 @@
     pull();
     setInterval(pull, 7000);
   }
+
+  // Performance history chart on the agent detail page (dependency-free SVG line chart).
+  // Reads metrics_history.php: a dynamic % family (CPU/Memory + every disk volume) is charted,
+  // and the non-% gauges (network / SMART health / temperature) show as a latest-value readout.
+  var chartCard = document.querySelector('[data-metric-history]');
+  if (chartCard) {
+    var histId    = chartCard.getAttribute('data-metric-history');
+    var canvas    = chartCard.querySelector('[data-chart-canvas]');
+    var legendEl  = chartCard.querySelector('[data-chart-legend]');
+    var extrasEl  = chartCard.querySelector('[data-chart-extras]');
+    var emptyEl   = chartCard.querySelector('[data-chart-empty]');
+    var rangeBtns = chartCard.querySelectorAll('.mp-range button');
+    var curRange  = '24h';
+    var reqSeq    = 0; // drop out-of-order responses when the range is switched quickly
+    var DISK_PALETTE = ['var(--green)', 'var(--blue-light)', 'var(--red)', 'var(--slate)', 'var(--amber)'];
+
+    var pad2 = function (n) { return (n < 10 ? '0' : '') + n; };
+    function timeLabel(ts, range) {
+      var d = new Date(ts * 1000);
+      if (range === '7d') return (d.getMonth() + 1) + '/' + d.getDate();
+      return pad2(d.getHours()) + ':' + pad2(d.getMinutes());
+    }
+    // Stable color per series: CPU/Memory fixed (match the live tiles), disks cycle a palette.
+    function colorize(pct) {
+      var di = 0;
+      return (pct || []).map(function (s) {
+        var c = s.key === 'cpu' ? 'var(--blue)'
+              : s.key === 'mem' ? 'var(--amber)'
+              : DISK_PALETTE[(di++) % DISK_PALETTE.length];
+        return { s: s, color: c };
+      });
+    }
+    function hasPct(series) { return series.some(function (it) { return it.s.points && it.s.points.length; }); }
+
+    function buildSvg(d, series) {
+      var W = 720, H = 220, padL = 30, padR = 10, padT = 10, padB = 22;
+      var plotW = W - padL - padR, plotH = H - padT - padB;
+      var from = d.from, now = Math.floor(Date.now() / 1000);
+      var span = Math.max(1, now - from);
+      function x(ts) { return padL + ((ts - from) / span) * plotW; }
+      function y(v) { return padT + (1 - Math.max(0, Math.min(100, v)) / 100) * plotH; }
+      var p = ['<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Performance history">'];
+      [0, 25, 50, 75, 100].forEach(function (g) {
+        var yy = y(g).toFixed(1);
+        p.push('<line class="mp-grid" x1="' + padL + '" y1="' + yy + '" x2="' + (W - padR) + '" y2="' + yy + '"/>');
+        p.push('<text class="mp-axis" x="' + (padL - 4) + '" y="' + (y(g) + 3).toFixed(1) + '" text-anchor="end">' + g + '</text>');
+      });
+      var ticks = 4;
+      for (var i = 0; i <= ticks; i++) {
+        var ts = from + (span * i / ticks), xx = x(ts).toFixed(1);
+        var anchor = i === 0 ? 'start' : (i === ticks ? 'end' : 'middle');
+        p.push('<text class="mp-axis" x="' + xx + '" y="' + (H - 6) + '" text-anchor="' + anchor + '">' + timeLabel(ts, d.range) + '</text>');
+      }
+      // Colors come from a fixed client-side palette (never server strings) so this innerHTML is safe.
+      series.forEach(function (it) {
+        var pts = it.s.points || [];
+        if (!pts.length) return;
+        if (pts.length === 1) {
+          // A lone sample renders invisibly as a polyline — draw a dot so it is visible.
+          p.push('<circle cx="' + x(pts[0][0]).toFixed(1) + '" cy="' + y(pts[0][1]).toFixed(1) + '" r="2.6" fill="' + it.color + '"/>');
+          return;
+        }
+        var line = pts.map(function (pt) { return x(pt[0]).toFixed(1) + ',' + y(pt[1]).toFixed(1); }).join(' ');
+        p.push('<polyline class="mp-line" style="stroke:' + it.color + '" points="' + line + '"/>');
+      });
+      p.push('</svg>');
+      return p.join('');
+    }
+
+    // Legend + extras are built as DOM nodes (textContent) so server-derived labels/instances can
+    // never inject markup, even though the portal already sanitizes metric keys/instances on ingest.
+    function renderLegend(series) {
+      legendEl.textContent = '';
+      series.forEach(function (it) {
+        var pts = it.s.points || [];
+        var last = pts.length ? pts[pts.length - 1][1] : null;
+        var span = document.createElement('span'); span.className = 'mp-leg';
+        var dot = document.createElement('span'); dot.className = 'dot'; dot.style.background = it.color;
+        var b = document.createElement('b'); b.textContent = (last === null ? '—' : fmtPct(last) + '%');
+        span.appendChild(dot);
+        span.appendChild(document.createTextNode(' ' + it.s.label + ' '));
+        span.appendChild(b);
+        legendEl.appendChild(span);
+      });
+    }
+    function fmtRate(kbps) {
+      if (kbps >= 1000) return (kbps / 1000).toFixed(1) + ' Mbps';
+      return Math.round(kbps) + ' kbps';
+    }
+    function fmtGb(g) { return (g >= 100 ? Math.round(g) : Math.round(g * 10) / 10) + ' GB'; }
+    function chip(label, value) {
+      var el = document.createElement('span'); el.className = 'mp-extra';
+      var k = document.createElement('span'); k.className = 'mp-extra-k'; k.textContent = label;
+      var b = document.createElement('b'); b.textContent = value;
+      el.appendChild(k); el.appendChild(b); return el;
+    }
+    function renderExtras(latest) {
+      if (!extrasEl) return;
+      extrasEl.textContent = '';
+      if (!latest || !latest.length) { extrasEl.hidden = true; return; }
+      var by = {};
+      latest.forEach(function (l) { (by[l.key] = by[l.key] || []).push(l); });
+      var chips = [];
+      if (by.net_down_kbps || by.net_up_kbps) {
+        var down = by.net_down_kbps ? by.net_down_kbps[0].value : 0;
+        var up = by.net_up_kbps ? by.net_up_kbps[0].value : 0;
+        chips.push(chip('Network', '↓ ' + fmtRate(down) + '   ↑ ' + fmtRate(up)));
+      }
+      (by.disk_free_gb || []).forEach(function (d) {
+        chips.push(chip('Disk ' + d.instance + ' free', fmtGb(d.value)));
+      });
+      (by.disk_health || []).forEach(function (h) {
+        var multi = (by.disk_health || []).length > 1;
+        chips.push(chip('Disk health' + (multi ? ' ' + h.instance : ''), h.value >= 1 ? 'OK' : 'At risk'));
+      });
+      (by.temp_c || []).forEach(function (t) {
+        var multi = (by.temp_c || []).length > 1;
+        chips.push(chip('Temp' + (multi ? ' ' + t.instance : ''), Math.round(t.value) + '°C'));
+      });
+      if (!chips.length) { extrasEl.hidden = true; return; }
+      chips.forEach(function (c) { extrasEl.appendChild(c); });
+      extrasEl.hidden = false;
+    }
+
+    function loadChart() {
+      var myReq = ++reqSeq;
+      fetch('metrics_history.php?id=' + histId + '&range=' + curRange, { credentials: 'same-origin' })
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          if (myReq !== reqSeq || !d || !d.ok) return; // ignore stale/out-of-order responses
+          var series = colorize(d.pct);
+          var anyPct = hasPct(series);
+          var anyLatest = d.latest && d.latest.length;
+          if (!anyPct && !anyLatest) {
+            canvas.innerHTML = ''; legendEl.textContent = '';
+            if (extrasEl) { extrasEl.hidden = true; extrasEl.textContent = ''; }
+            if (emptyEl) emptyEl.hidden = false;
+            return;
+          }
+          if (emptyEl) emptyEl.hidden = true;
+          renderLegend(series);
+          canvas.innerHTML = anyPct ? buildSvg(d, series) : '';
+          renderExtras(d.latest);
+        }).catch(function () {});
+    }
+    for (var bi = 0; bi < rangeBtns.length; bi++) {
+      rangeBtns[bi].addEventListener('click', function (ev) {
+        var b = ev.currentTarget;
+        curRange = b.getAttribute('data-range');
+        for (var j = 0; j < rangeBtns.length; j++) {
+          var on = rangeBtns[j] === b;
+          rangeBtns[j].classList.toggle('active', on);
+          rangeBtns[j].setAttribute('aria-pressed', on ? 'true' : 'false');
+        }
+        loadChart();
+      });
+    }
+    loadChart();
+    setInterval(loadChart, 60000);
+  }
 })();
