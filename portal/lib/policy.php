@@ -134,11 +134,11 @@ function effective_policy_for_agent(int $agentId): array
         }
     }
 
-    // The etag drives the agent/backend policy refetch. `thresholds` is a SERVER-SIDE concern
-    // (evaluated in metrics_snapshot.php; the agent never acts on it), so exclude it from the etag
-    // — editing an alert threshold must not force every agent to re-pull its policy.
+    // The etag drives the agent/backend policy refetch. `thresholds` (alerting) and `patch_settings`
+    // (patch rings) are SERVER-SIDE concerns the agent never acts on, so exclude them from the etag —
+    // editing an alert threshold or patch ring must not force every agent to re-pull its policy.
     $forEtag = $eff;
-    unset($forEtag['thresholds']);
+    unset($forEtag['thresholds'], $forEtag['patch_settings']);
     return ['effective' => $eff, 'etag' => policy_etag($forEtag)];
 }
 

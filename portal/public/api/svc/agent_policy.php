@@ -31,10 +31,11 @@ try {
     db()->prepare('UPDATE agents SET policy_etag=? WHERE id=?')->execute([$res['etag'], $agentId]);
 } catch (Throwable $e) { /* column not present yet */ }
 
-// `thresholds` is a server-side alerting concern — the agent evaluates nothing from it, so keep it
-// out of the agent-facing payload (the etag already excludes it, so this never causes a refetch).
+// `thresholds` (alerting) and `patch_settings` (patch rings) are server-side concerns — the agent
+// evaluates nothing from them, so keep them out of the agent-facing payload (the etag already
+// excludes them, so this never causes a refetch).
 $effective = $res['effective'];
-unset($effective['thresholds']);
+unset($effective['thresholds'], $effective['patch_settings']);
 
 json_out([
     'ok'          => true,
