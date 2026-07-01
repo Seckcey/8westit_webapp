@@ -71,6 +71,34 @@ if ($action === 'rollout_delete') {
     json_out(['ok' => true]);
 }
 
+if ($action === 'rollout_rollback') {
+    // Best-effort roll back the KBs Milepost installed for this rollout's current ring. Fix-forward is
+    // primary; some updates can't be uninstalled (a 1.4.0+ agent reports that per-KB). This is the manual
+    // recourse after an auto-halt — queue one patch_rollback job per target that actually installed.
+    $rid = (int)($_POST['id'] ?? 0);
+    if ($rid <= 0) json_err('id required', 400);
+    $ro = patch_rollout_get($rid);
+    if (!$ro) json_err('Not found', 404);
+    $ring = (string)($ro['current_ring'] ?? '');
+    if ($ring !== '') {
+        $st = $pdo->prepare("SELECT agent_id, kb_list FROM patch_rollout_targets WHERE rollout_id=? AND ring=? AND kb_list IS NOT NULL AND kb_list<>''");
+        $st->execute([$rid, $ring]);
+    } else {
+        $st = $pdo->prepare("SELECT agent_id, kb_list FROM patch_rollout_targets WHERE rollout_id=? AND kb_list IS NOT NULL AND kb_list<>''");
+        $st->execute([$rid]);
+    }
+    $n = 0;
+    foreach ($st->fetchAll() as $t) {
+        $kbs = patch_kb_sanitize((string)$t['kb_list']);
+        if (!$kbs) continue;
+        $pdo->prepare("INSERT INTO jobs (agent_id, created_by, job_type, payload) VALUES (?,?,'patch_rollback',?)")
+            ->execute([(int)$t['agent_id'], $uid, implode(',', $kbs)]);
+        $n++;
+    }
+    audit($uid, null, 'patch_rollout_rollback', "rollout#$rid ring=$ring targets=$n");
+    json_out(['ok' => true, 'targets' => $n]);
+}
+
 if ($action === 'prule_save') {
     $scopeType = (string)($_POST['scope_type'] ?? 'global');
     if (!in_array($scopeType, ['global', 'client', 'site', 'group', 'device'], true)) json_err('Bad scope', 400);

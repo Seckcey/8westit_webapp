@@ -126,6 +126,9 @@ layout_header('Patches', $user);
         if (ro.status === 'draft' || ro.status === 'paused') act.appendChild(btn('Start', 'btn-sm btn-primary', () => post({ action: 'rollout_status', id: ro.id, to: 'running' }).then(load)));
         if (ro.status === 'running') act.appendChild(btn('Pause', 'btn-sm btn-ghost', () => post({ action: 'rollout_status', id: ro.id, to: 'paused' }).then(load)));
         if (ro.status === 'running' || ro.status === 'paused') act.appendChild(btn('Halt', 'btn-sm btn-ghost', () => { if (confirm('Halt this rollout?')) post({ action: 'rollout_status', id: ro.id, to: 'halted' }).then(load); }));
+        if (['halted', 'paused', 'completed'].indexOf(ro.status) !== -1 && ((p.verified || 0) + (p.installed || 0) + (p.failed || 0)) > 0) {
+          act.appendChild(btn('Roll back ring', 'btn-sm btn-ghost', () => { if (confirm('Roll back the updates Milepost installed for this ring? Best-effort — some updates cannot be uninstalled — and it may require reboots.')) post({ action: 'rollout_rollback', id: ro.id }).then(r => { alert(r && r.ok ? (r.targets + ' device(s) queued for rollback.') : ((r && r.error) || 'Rollback failed.')); load(); }); }));
+        }
         act.appendChild(btn('Delete', 'btn-sm btn-danger', () => { if (confirm('Delete this rollout?')) post({ action: 'rollout_delete', id: ro.id }).then(load); }));
       }
       tr.appendChild(act); body.appendChild(tr);

@@ -32,7 +32,7 @@ namespace EightWest.Agent
                     return v.Major + "." + v.Minor + "." + (v.Build < 0 ? 0 : v.Build);
             }
             catch { /* fall through to the literal */ }
-            return "1.3.0";
+            return "1.4.0";
         }
 
         private readonly ManualResetEvent _stop = new ManualResetEvent(false);
@@ -434,28 +434,28 @@ namespace EightWest.Agent
                 // Patch jobs are handled here in the Worker (which owns the API + PatchManager
                 // reporting), not in JobRunner. Installs run on a BACKGROUND thread so a long
                 // download/install never stalls the heartbeat loop (the agent stays online).
-                if (type == "patch_scan" || type == "patch_install")
+                if (type == "patch_scan" || type == "patch_install" || type == "patch_rollback")
                 {
                     if (id != 0) _state.MarkJobSeen(id);
-                    if (type == "patch_install")
+                    if (type == "patch_install" || type == "patch_rollback")
                     {
-                        int jobId = id; string kb = payload;
+                        int jobId = id; string kb = payload; string ptype = type;
                         new Thread(() =>
                         {
                             JobResult pr;
                             JobRunner.ExecGate.Wait();
-                            try { pr = new JobResult { Success = true, ExitCode = 0, Output = PatchManager.Install(kb) }; }
-                            catch (Exception ex) { pr = new JobResult { Success = false, ExitCode = -1, Output = "Install error: " + ex.Message }; }
+                            try { pr = new JobResult { Success = true, ExitCode = 0, Output = ptype == "patch_rollback" ? PatchManager.Rollback(kb) : PatchManager.Install(kb) }; }
+                            catch (Exception ex) { pr = new JobResult { Success = false, ExitCode = -1, Output = ptype + " error: " + ex.Message }; }
                             finally { JobRunner.ExecGate.Release(); }
                             try
                             {
                                 new ApiClient(_cfg.PortalUrl, _state.AuthToken).Post("/api/jobs.php", new Dictionary<string, object>
                                 { ["job_id"] = jobId, ["status"] = pr.Success ? "done" : "error", ["exit_code"] = pr.ExitCode, ["output"] = pr.Output });
                             }
-                            catch (Exception ex) { Log.Warn("patch_install result report failed: " + ex.Message); }
+                            catch (Exception ex) { Log.Warn(ptype + " result report failed: " + ex.Message); }
                         })
-                        { IsBackground = true, Name = "PatchInstall" }.Start();
-                        Log.Info($"patch_install job {id} started (background thread).");
+                        { IsBackground = true, Name = "PatchOp" }.Start();
+                        Log.Info($"{type} job {id} started (background thread).");
                     }
                     else // patch_scan — quick, run inline
                     {

@@ -194,3 +194,48 @@ function patch_ring_agents(array $rollout, string $ring): array
     }
     return $out;
 }
+
+/* ── Rollback (Phase 3 increment 3) ──────────────────────────────────────────────────────────────
+   Best-effort per-KB uninstall (DISM Remove-WindowsPackage, wusa fallback) run by a 1.4.0+ agent.
+   Fix-forward is the primary path; rollback is a human-gated, admin-only recourse. Servicing-stack /
+   feature / many cumulative updates cannot be uninstalled — the agent reports that honestly per-KB. */
+
+/** Sanitize a KB list (array or CSV) to unique uppercased KB tokens. Caps at $max. */
+function patch_kb_sanitize($list, int $max = 100): array
+{
+    if (is_string($list)) $list = explode(',', $list);
+    $out = [];
+    foreach ((array)$list as $k) {
+        $k = strtoupper(trim((string)$k));
+        if (preg_match('/^KB[0-9]{4,10}$/', $k) && !in_array($k, $out, true)) $out[] = $k;
+        if (count($out) >= $max) break;
+    }
+    return $out;
+}
+
+/**
+ * KBs Milepost has installed on this device (manual installs + rollout auto-installs both create
+ * 'patch_install' jobs), de-duped most-recent-first — the set an admin can choose to roll back.
+ * Returns [['kb'=>'KB…','at'=>DATETIME], …]. Tolerant of a pre-migration DB.
+ */
+function patch_installed_kbs_for_agent(int $agentId, int $limit = 50): array
+{
+    try {
+        $st = db()->prepare(
+            "SELECT payload, created_at FROM jobs
+              WHERE agent_id=? AND job_type='patch_install' AND status='done'
+              ORDER BY id DESC LIMIT 200"
+        );
+        $st->execute([$agentId]);
+        $seen = []; $out = [];
+        foreach ($st as $r) {
+            foreach (patch_kb_sanitize((string)$r['payload']) as $kb) {
+                if (isset($seen[$kb])) continue;
+                $seen[$kb] = true;
+                $out[] = ['kb' => $kb, 'at' => $r['created_at']];
+                if (count($out) >= $limit) return $out;
+            }
+        }
+        return $out;
+    } catch (Throwable $e) { return []; }
+}

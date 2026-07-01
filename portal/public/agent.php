@@ -119,6 +119,22 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
                 $flash = count($kbs) . ' update(s) queued to install — this can take several minutes. Use "Scan now" afterward to refresh.';
             }
         }
+    } elseif ($action === 'patch_rollback') {
+        // Best-effort uninstall of selected KBs (DESTRUCTIVE → admin-only). Honest: some updates
+        // (servicing-stack / feature / many cumulative) can't be removed — the job output says so per-KB.
+        if (($user['role'] ?? '') !== 'admin') {
+            $flash = 'Only admins can roll back updates.';
+        } else {
+            $kbs = patch_kb_sanitize($_POST['kb'] ?? []);
+            if (!$kbs) {
+                $flash = 'No updates selected.';
+            } else {
+                db()->prepare('INSERT INTO jobs (agent_id, created_by, job_type, payload) VALUES (?,?,\'patch_rollback\',?)')
+                    ->execute([$id, $user['id'], implode(',', $kbs)]);
+                audit((int)$user['id'], $id, 'patch_rollback', count($kbs) . ' KBs: ' . implode(',', $kbs));
+                $flash = count($kbs) . ' update(s) queued to roll back — best-effort (some may not be reversible). Use "Scan now" afterward to refresh.';
+            }
+        }
     } elseif ($action === 'archive') {
         db()->prepare('UPDATE agents SET is_archived=1 WHERE id=?')->execute([$id]);
         audit((int)$user['id'], $id, 'archive', '');
@@ -347,6 +363,33 @@ $pList    = $patch ? (json_decode((string)$patch['pending_json'], true) ?: []) :
           <p class="muted small" style="margin-top:10px">Only admins can install updates.</p>
         <?php endif; ?>
       </form>
+    <?php endif; ?>
+    <?php $pInstalled = patch_installed_kbs_for_agent($id); if ($pInstalled && ($user['role'] ?? '') === 'admin'): ?>
+      <details style="margin-top:16px">
+        <summary class="muted small" style="cursor:pointer">Roll back — updates Milepost installed here (<?= count($pInstalled) ?>)</summary>
+        <p class="muted small" style="margin:8px 0 4px">Best-effort uninstall (DISM, then wusa). Servicing-stack, feature, and many cumulative updates
+          <b>cannot be removed</b> — the result reports that per-KB (fix-forward is the primary path). If this device is in a
+          running rollout, pause it first so the update isn't re-installed.</p>
+        <form method="post">
+          <input type="hidden" name="csrf" value="<?= e($csrf) ?>">
+          <input type="hidden" name="action" value="patch_rollback">
+          <table class="grid mini">
+            <thead><tr><th style="width:34px"></th><th>KB</th><th>Installed</th></tr></thead>
+            <tbody>
+            <?php foreach ($pInstalled as $u): ?>
+              <tr>
+                <td><input type="checkbox" name="kb[]" value="<?= e($u['kb']) ?>"></td>
+                <td class="muted"><?= e($u['kb']) ?></td>
+                <td class="muted small"><?= e(time_ago($u['at'])) ?></td>
+              </tr>
+            <?php endforeach; ?>
+            </tbody>
+          </table>
+          <div class="rule-editor-actions">
+            <button class="btn-sm btn-ghost" onclick="return confirm('Roll back the selected updates on this device? Best-effort — some updates cannot be uninstalled — and it may require a reboot afterward.');">Roll back selected</button>
+          </div>
+        </form>
+      </details>
     <?php endif; ?>
   <?php endif; ?>
 </section>

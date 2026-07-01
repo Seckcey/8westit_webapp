@@ -103,21 +103,56 @@ Tagline: *"Every endpoint, every mile."* Live in production. **This GitHub repo 
   alerting for matching devices (gated in `alerts_evaluate` + offline sweep + held in the dispatch cron); managed on the
   Alerts page. Webhooks in `config.php` `alerts.webhooks` (slack/discord/telegram/generic, https-only) sent by the cron via
   `lib/webhook.php` alongside email. DEPLOY = import migration → upload changed portal files → (optional) add `alerts.webhooks`.
-- **Phase 3 (patch management) — MVP "scan & report" BUILT + tested, NOT yet deployed (2026-07-02).** Windows-Update-direct
+- **Phase 3 (patch management) — MVP "scan & report" BUILT + DEPLOYED + LIVE (2026-07-02).** Windows-Update-direct
   patch VISIBILITY only (no installs yet). **Agent 1.2.0** `PatchManager` shells a WUA COM PowerShell scan (`IsInstalled=0`)
   on startup + a timer, POSTs to `api/patch_report.php`, gated by a heartbeat `patch` directive that appears only when
   `config.php` `patch.enabled` is on. Portal: `agent_patch_status` table (migration `2026-07-02_phase3_patch.sql`),
   `lib/patch.php`, a Patch card on `agent.php`, a fleet badge on `index.php`. Chosen rollback approach (built later) =
   best-effort per-KB DISM/wusa uninstall + honest "not reversible" flags.
-- **Phase 3 increment 2a — manual, human-approved patch INSTALL: BUILT + tested, NOT yet deployed (2026-07-02).** **Agent
+- **Phase 3 increment 2a — manual, human-approved patch INSTALL: BUILT + DEPLOYED + LIVE (2026-07-02).** **Agent
   1.3.0** adds `PatchManager.Install(kbCsv)` (WUA COM download+install of selected KBs, runs on a BACKGROUND thread so a
   long install never stalls the heartbeat, re-scans + self-reports after) + on-demand `patch_scan`/`patch_install` job
   handling in `Worker.DrainJobs`. Portal: migration `2026-07-02_phase3_patch_install.sql` (appends `patch_scan`,`patch_install`
   to `jobs.job_type`); `agent.php` Patch card gains per-update checkboxes + "Install selected" (admin-only, KB-sanitized) +
   "Scan now". No automation, no auto-reboot (reboot stays a manual `restart` job) — the human click IS the approval; the
   actual WUA install is destructive so it's canary-validated, not locally testable. DEPLOY = import both patch migrations →
-  upload portal files → ship the 1.3.0 templates → canary. **Remaining: (2b) ring-rollout AUTOMATION (`patch_settings` policy
-  key stripped from agent payload like thresholds, `patch_rollouts` tables, rollout cron state machine, maintenance-window
-  install gate, auto-approve + reboot policy — the destructive-automation decisions live here); (3) rollback + auto-halt.**
+  upload portal files → ship the 1.3.0 templates → canary.
+- **Phase 3 increment 2b — ring-rollout AUTOMATION (portal-only, NO agent change): BUILT + DEPLOYED + LIVE
+  (2026-07-02).** Portal Phase 3 (all 3 migrations + files + `patch_rollout.php` cron) is deployed on live and
+  `patch.enabled=true`; agent 1.3.0 is on the canary — the full patch subsystem is reachable in production. New
+  server-only `patch_settings` policy key (ring `canary|early|broad|exclude` / `auto_approve[]`
+  classifications / `reboot{policy,grace_min,prompt_user}`) inherited by the same engine as `thresholds`, stripped from the
+  agent payload in `agent_policy.php` + excluded from the policy etag in `policy.php`. Migration
+  `2026-07-02_phase3_patch_rollout.sql` (`patch_rollouts` + `patch_rollout_targets`). Engine = 1-min CLI cron
+  `cron/patch_rollout.php`: per running rollout it enrolls each ring's in-scope agents as targets, then a per-target state
+  machine (`pending→installing→installed→verified`, `failed` on error) that creates `patch_install` jobs ONLY for
+  auto-approved KBs (from the agent's last scan matching `auto_approve`) and ONLY while the rollout is online + inside a
+  maintenance window; reboots `if_required` in-window with grace; a ring auto-HALTs if `failure_pct ≥ max_failure_pct` and
+  auto-advances to the next ring after the bake time (`advance_after_min`). Helpers live in `lib/patch.php`
+  (`patch_default_settings`, `patch_settings_for_agent`, `patch_auto_approve_kbs`, `patch_ring_agents`, rollout list/get).
+  UI = new admin-only `patches.php` (Rollouts card: create/start/pause/halt/delete + per-state progress; Patch policy card:
+  ring / auto-approve / reboot per scope) with `patches_data.php` + `patches_action.php` (admin-only, CSRF), plus a Patches
+  nav link. Validated locally: engine 16 assertions (happy path + window-gate + auto-halt + reboot) + UI 5 assertions.
+  DEPLOY (portal-only) = import migration `2026-07-02_phase3_patch_rollout.sql` → upload portal files → add 1-min
+  `cron/patch_rollout.php` cron.
+- **Phase 3 increment 3 — patch ROLLBACK: BUILT + tested, NOT yet deployed (2026-07-02).** **Agent 1.4.0** adds
+  `PatchManager.Rollback(kbCsv)` = best-effort per-KB uninstall (DISM `Remove-WindowsPackage` first, `wusa /uninstall`
+  fallback) with HONEST per-KB reversibility — servicing-stack / feature / many cumulative updates can't be removed and
+  come back `ok=false, reversible=false` (fix-forward stays primary); runs on the same BACKGROUND thread as install,
+  re-scans + self-reports after. `Worker.DrainJobs` now handles `patch_rollback` alongside `patch_install`. Portal:
+  migration `2026-07-02_phase3_patch_rollback.sql` (appends `patch_rollback` to `jobs.job_type`); `lib/patch.php` gains
+  `patch_kb_sanitize` + `patch_installed_kbs_for_agent` (distinct KBs from this device's *done* `patch_install` jobs —
+  both manual + rollout auto-installs); admin-only per-device rollback UI on `agent.php` (a "Roll back — updates Milepost
+  installed here" details block with honest copy) + a rollout-level **Roll back ring** button on `patches.php` for
+  halted/paused/completed rollouts (new `rollout_rollback` action in `patches_action.php`, admin-only, queues one
+  `patch_rollback` job per installed target). **The auto-HALT (2b) IS the "automatic" safety** — literal auto-uninstall
+  is impossible for many Windows updates, so the design = auto-halt on failure + fix-forward + manual best-effort rollback.
+  Validated locally: migration chain clean; agent `dotnet build` 0/0; 6 real-endpoint/helper assertions (kb-sanitize,
+  installed-KB lookup, admin per-device rollback + junk-KB drop, tech 403 blocked, rollout_rollback per-target). DEPLOY =
+  import `2026-07-02_phase3_patch_rollback.sql` → upload portal files (lib/patch.php, agent.php, patches.php,
+  patches_action.php) → ship the 1.4.0 templates → canary. **Phase 3 patch core (WU scan/install/ring-rollout/rollback)
+  is now feature-complete. Next Phase-3 increment (recommended): third-party app patching via winget** (reuses the same
+  job/install/ring machinery). Lower-priority Phase-3 fast-follows: per-client/site compliance report; software
+  inventory + license tracking.
 - Roadmap doc: `8 West IT/Milepost-Product-Roadmap.docx` (9 phases). Phase 3 = patch management (ring rollout + rollback).
 - Deep project history, deploy specifics, and lessons live in the Claude memory files (`8west-rmm-project.md`).
