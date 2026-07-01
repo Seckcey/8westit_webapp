@@ -55,6 +55,7 @@ function layout_header(string $title, ?array $user): void
     <a href="clients.php">Clients</a>
     <?php $openAlerts = $u ? alerts_open_count() : 0; ?>
     <a href="alerts.php" class="nav-alerts">Alerts<?php if ($openAlerts > 0): ?><span class="nav-badge"><?= (int)$openAlerts ?></span><?php endif; ?></a>
+    <a href="patches.php">Patches</a>
     <a href="deploy.php">Deploy&nbsp;Agent</a>
     <?php if ($u && ($u['role'] ?? '') === 'admin'): ?>
       <a href="users.php">Users</a>
