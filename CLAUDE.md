@@ -42,6 +42,9 @@ Tagline: *"Every endpoint, every mile."* Live in production. **This GitHub repo 
   `db()` pins the MySQL session to UTC (`+00:00`); all `DATETIME` columns store UTC.
 - **JSON read endpoints** are session-authed top-level `public/*.php` pages (mirror `agent_live.php`): `enforce_https();
   if (!current_user()) json_err('Unauthorized', 401);` then `json_out([...])`. 404 (not 403) for missing/archived ids.
+  `current_user()`/`csrf_check()` live in `auth.php` — a JSON/action endpoint must `require` `render.php` OR `auth.php`
+  (NOT just a lib like `alerts.php` that only pulls `bootstrap.php`+`policy.php`), or you get a fatal undefined-function
+  500 that `php -l` can't catch — verify new endpoints by actually hitting them, not just linting + lib-level tests.
 - **Bump `MP_ASSET_VER`** in `lib/render.php` whenever you change `app.css`/`app.js` (cache-buster).
 - **Agent version** is derived from the assembly (`Worker.Version` → `Assembly … GetName().Version`) — bump it in
   `EightWestAgent.csproj` **and** `Product.wxs` together; don't hardcode a version string anywhere.
@@ -91,9 +94,15 @@ Tagline: *"Every endpoint, every mile."* Live in production. **This GitHub repo 
   built-in-default disk alert emailed successfully). Portal-only. Threshold engine on the policy inheritance engine +
   alert lifecycle (open→ack→resolve) + email/in-app delivery + Alerts UI. Migration
   `db/migrations/2026-07-01_phase2_alerting.sql`. Mail via HostGator's local Exim (`alerts.smtp` host `localhost`:25,
-  `secure`=`''`, no auth). **Deferred fast-follow: maintenance windows + webhook (Slack/Discord/Telegram).**
+  `secure`=`''`, no auth).
   GOTCHA burned in: `last_value` is a MySQL-8 reserved word (LAST_VALUE window fn) → column renamed `last_val`
   (MariaDB didn't flag it locally — audit new identifiers against the 8.0 reserved-word list, esp. window-fn words).
+- **Phase 2 fast-follow — maintenance windows + webhook delivery: BUILT + tested, NOT yet deployed (2026-07-01).**
+  Migration `db/migrations/2026-07-01_phase2_maint_webhook.sql` (maintenance_windows table + adds 'webhook' to
+  alert_deliveries.channel). Maintenance windows (scoped like thresholds, one-off/daily/weekly, UTC) FULLY suppress
+  alerting for matching devices (gated in `alerts_evaluate` + offline sweep + held in the dispatch cron); managed on the
+  Alerts page. Webhooks in `config.php` `alerts.webhooks` (slack/discord/telegram/generic, https-only) sent by the cron via
+  `lib/webhook.php` alongside email. DEPLOY = import migration → upload changed portal files → (optional) add `alerts.webhooks`.
 - Roadmap doc: `8 West IT/Milepost-Product-Roadmap.docx` (9 phases). After Step 3: **Phase 3 = patch management**
   (ring rollout + rollback).
 - Deep project history, deploy specifics, and lessons live in the Claude memory files (`8west-rmm-project.md`).

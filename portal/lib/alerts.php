@@ -79,7 +79,8 @@ function alert_lookup_rule(array $thresholds, string $mk, string $inst): ?array
     $warning  = (array_key_exists('warning', $raw)  && $raw['warning']  !== null) ? (float)$raw['warning']  : null;
     $critical = (array_key_exists('critical', $raw) && $raw['critical'] !== null) ? (float)$raw['critical'] : null;
     if ($warning === null && $critical === null) return null;
-    $op = in_array(($raw['op'] ?? 'gt'), ['gt', 'lt', 'gte', 'lte', 'eq'], true) ? $raw['op'] : 'gt';
+    $opv = $raw['op'] ?? 'gt';
+    $op  = in_array($opv, ['gt', 'lt', 'gte', 'lte', 'eq'], true) ? $opv : 'gt';
     $forMin   = max(0, (int)($raw['for_min'] ?? 0));
     $clearMin = array_key_exists('clear_min', $raw) ? max(0, (int)$raw['clear_min']) : $forMin;
     return ['op' => $op, 'warning' => $warning, 'critical' => $critical,
@@ -116,6 +117,9 @@ function alert_level(float $v, array $rule): array
 function alerts_evaluate(PDO $pdo, int $agentId, array $samples, string $now): void
 {
     if (!$samples) return;
+    // Maintenance window = full suppression: skip evaluation entirely (no open/escalate/resolve,
+    // no notifications) while a matching window is active. Real conditions surface after it ends.
+    if (maintenance_active_for_agent($agentId, strtotime($now . ' UTC'))) return;
     $thresholds = alert_thresholds_for_agent($agentId);
 
     // Preload this agent's state + active alerts so the loop is index lookups, not per-sample queries.
@@ -231,15 +235,45 @@ function alert_resolve(PDO $pdo, int $alertId, ?float $val, string $now): void
  */
 function alert_enqueue(PDO $pdo, int $alertId, string $event): void
 {
-    $a  = cfg('alerts', []);
+    $a   = cfg('alerts', []);
+    $now = gmdate('Y-m-d H:i:s');
+    $ins = $pdo->prepare(
+        "INSERT INTO alert_deliveries (alert_id, event, channel, target, status, next_try_at)
+         VALUES (?,?,?,?,'pending',?)"
+    );
+    // Email — one row addressed to all recipients (empty list => in-app only, no email row).
     $to = (isset($a['email_to']) && is_array($a['email_to']))
         ? array_values(array_filter(array_map('trim', $a['email_to']), 'strlen')) : [];
-    if (!$to) return;
-    $target = mb_substr(implode(',', $to), 0, 255);
-    $pdo->prepare(
-        "INSERT INTO alert_deliveries (alert_id, event, channel, target, status, next_try_at)
-         VALUES (?,?,'email',?,'pending',?)"
-    )->execute([$alertId, $event, $target, gmdate('Y-m-d H:i:s')]);
+    if ($to) {
+        $ins->execute([$alertId, $event, 'email', mb_substr(implode(',', $to), 0, 255), $now]);
+    }
+    // Webhooks — one row per configured target (Slack/Discord/Telegram/generic).
+    $webhooks = (isset($a['webhooks']) && is_array($a['webhooks'])) ? $a['webhooks'] : [];
+    foreach ($webhooks as $w) {
+        if (!is_array($w)) continue;
+        $target = webhook_target_string($w);
+        if ($target === '') continue;
+        $ins->execute([$alertId, $event, 'webhook', mb_substr($target, 0, 255), $now]);
+    }
+}
+
+/**
+ * Serialize a configured webhook to the compact "type|…" form stored in alert_deliveries.target
+ * (cron/alerts_dispatch.php parses it): "slack|<https url>", "discord|<url>", "generic|<url>", or
+ * "telegram|<bot token>|<chat id>". Returns '' for an invalid/incomplete config (URLs must be https).
+ */
+function webhook_target_string(array $w): string
+{
+    $type = strtolower((string)($w['type'] ?? 'generic'));
+    if ($type === 'telegram') {
+        $token = trim((string)($w['token'] ?? ''));
+        $chat  = trim((string)($w['chat_id'] ?? ''));
+        return ($token !== '' && $chat !== '') ? ('telegram|' . $token . '|' . $chat) : '';
+    }
+    $url = trim((string)($w['url'] ?? ''));
+    if ($url === '' || !preg_match('#^https://#i', $url)) return '';
+    if (!in_array($type, ['slack', 'discord', 'generic'], true)) $type = 'generic';
+    return $type . '|' . $url;
 }
 
 /* ── Human-readable labels ─────────────────────────────────────────────────────────────────── */
@@ -296,7 +330,8 @@ function alerts_sweep_offline(PDO $pdo, string $now): array
     }
     $rows = $pdo->query('SELECT id, hostname, display_name, last_seen_at FROM agents WHERE is_archived=0')->fetchAll();
     foreach ($rows as $r) {
-        $aid      = (int)$r['id'];
+        $aid = (int)$r['id'];
+        if (maintenance_active_for_agent($aid, $nowTs)) continue;   // planned reboot -> no offline alert
         $orule    = alert_offline_rule($aid);   // per-agent: policy > config > built-in default
         $offMin   = $orule['for_min'];
         $lastSeen = !empty($r['last_seen_at']) ? strtotime($r['last_seen_at'] . ' UTC') : null;
@@ -397,4 +432,86 @@ function alert_manual_resolve(int $alertId): bool
            WHERE a.id = ?"
     )->execute([$alertId]);
     return true;
+}
+
+/* ── Maintenance windows ─────────────────────────────────────────────────────────────────────── */
+
+/**
+ * True if any ENABLED maintenance window whose scope matches the agent's chain
+ * (global/client/site/group/device) is active at $nowTs. Per-request cached. Tolerant of a
+ * pre-migration DB (no table -> not in maintenance).
+ */
+function maintenance_active_for_agent(int $agentId, int $nowTs): bool
+{
+    static $cache = [];
+    if (array_key_exists($agentId, $cache)) return $cache[$agentId];
+    try {
+        $chain  = policy_agent_chain($agentId);
+        $scopes = [['global', null]];
+        if ($chain) {
+            if (!empty($chain['client_id'])) $scopes[] = ['client', (int)$chain['client_id']];
+            if (!empty($chain['site_id']))   $scopes[] = ['site',   (int)$chain['site_id']];
+            if (!empty($chain['group_id']))  $scopes[] = ['group',  (int)$chain['group_id']];
+            $scopes[] = ['device', (int)$chain['id']];
+        }
+        $conds = []; $args = [];
+        foreach ($scopes as [$type, $sid]) {
+            $conds[] = '(scope_type=? AND ' . ($sid === null ? 'scope_id IS NULL' : 'scope_id=?') . ')';
+            $args[]  = $type;
+            if ($sid !== null) $args[] = $sid;
+        }
+        $st = db()->prepare(
+            'SELECT starts_at, ends_at, recurrence FROM maintenance_windows
+              WHERE is_enabled=1 AND (' . implode(' OR ', $conds) . ')'
+        );
+        $st->execute($args);
+        foreach ($st as $w) {
+            if (mw_is_active_now($w, $nowTs)) return $cache[$agentId] = true;
+        }
+    } catch (Throwable $e) {
+        return $cache[$agentId] = false;   // table not present yet
+    }
+    return $cache[$agentId] = false;
+}
+
+/** Is a single window row active at $nowTs? Handles one-off + daily/weekly recurrence (all UTC). */
+function mw_is_active_now(array $w, int $nowTs): bool
+{
+    $start = strtotime((string)$w['starts_at'] . ' UTC');
+    $end   = strtotime((string)$w['ends_at'] . ' UTC');
+    if ($start === false || $end === false || $end <= $start) return false;
+    $dur = $end - $start;
+
+    switch ((string)$w['recurrence']) {
+        case 'none':
+            return $nowTs >= $start && $nowTs <= $end;
+        case 'daily':
+            // check today's and yesterday's occurrence (covers windows that span midnight)
+            for ($d = 0; $d <= 1; $d++) {
+                $occ = strtotime(gmdate('Y-m-d', $nowTs - $d * 86400) . ' ' . gmdate('H:i:s', $start) . ' UTC');
+                if ($occ >= $start && $nowTs >= $occ && $nowTs <= $occ + $dur) return true;
+            }
+            return false;
+        case 'weekly':
+            $wday = (int)gmdate('w', $start);
+            for ($d = 0; $d <= 7; $d++) {
+                $dayTs = $nowTs - $d * 86400;
+                if ((int)gmdate('w', $dayTs) !== $wday) continue;
+                $occ = strtotime(gmdate('Y-m-d', $dayTs) . ' ' . gmdate('H:i:s', $start) . ' UTC');
+                if ($occ >= $start && $nowTs >= $occ && $nowTs <= $occ + $dur) return true;
+            }
+            return false;
+    }
+    return false;
+}
+
+/** List maintenance windows for the UI. Tolerant of a pre-migration DB. */
+function maintenance_windows_list(): array
+{
+    try {
+        return db()->query(
+            'SELECT id, name, scope_type, scope_id, starts_at, ends_at, recurrence, is_enabled
+               FROM maintenance_windows ORDER BY is_enabled DESC, starts_at DESC'
+        )->fetchAll();
+    } catch (Throwable $e) { return []; }
 }

@@ -64,6 +64,51 @@ layout_header('Alerts', $user);
   </form>
 </section>
 
+<section class="card">
+  <div class="card-head">
+    <h3>Maintenance windows</h3>
+    <button class="btn-sm btn-ghost" id="mw-add">+ Add window</button>
+  </div>
+  <p class="muted small">While a window is active, alerting is <b>fully suppressed</b> for matching
+     devices (no alerts, no notifications) — use it around planned reboots/patching. Scope inherits like
+     rules. All times are <b>UTC</b>.</p>
+  <div id="mw-list"></div>
+
+  <form id="mw-editor" class="rule-editor" hidden>
+    <input type="hidden" id="mw-id" value="">
+    <div class="rule-editor-row">
+      <label>Name<input id="mw-name" placeholder="e.g. Sunday patching"></label>
+      <label>Scope
+        <select id="mw-scope-type">
+          <option value="global">Global (all devices)</option>
+          <option value="client">Client</option>
+          <option value="site">Site</option>
+          <option value="group">Group</option>
+          <option value="device">Device</option>
+        </select>
+      </label>
+      <label id="mw-target-wrap" hidden>Target<select id="mw-scope-id"></select></label>
+      <label class="chk"><input type="checkbox" id="mw-enabled" checked> Enabled</label>
+    </div>
+    <div class="rule-editor-row">
+      <label>Start (UTC)<input type="datetime-local" id="mw-start"></label>
+      <label>End (UTC)<input type="datetime-local" id="mw-end"></label>
+      <label>Repeat
+        <select id="mw-recurrence">
+          <option value="none">Once</option>
+          <option value="daily">Daily</option>
+          <option value="weekly">Weekly</option>
+        </select>
+      </label>
+    </div>
+    <div class="rule-editor-actions">
+      <button type="submit" class="btn-sm btn-primary">Save window</button>
+      <button type="button" class="btn-sm btn-ghost" id="mw-cancel">Cancel</button>
+      <span class="muted small" id="mw-msg"></span>
+    </div>
+  </form>
+</section>
+
 <script>
 (function () {
   const CSRF = <?= json_encode($csrf) ?>;
@@ -105,6 +150,7 @@ layout_header('Alerts', $user);
       data = await r.json();
       renderAlerts();
       renderRules();
+      renderWindows();
     } catch (e) { /* transient; next poll retries */ }
   }
 
@@ -261,6 +307,81 @@ layout_header('Alerts', $user);
     else { $('rule-msg').textContent = (res && res.error) ? res.error : 'Save failed.'; }
   }
 
+  /* ── Maintenance windows ────────────────────────────────────────────────── */
+  function renderWindows() {
+    const wrap = $('mw-list'); wrap.textContent = '';
+    const wins = data.windows || [];
+    if (!wins.length) { wrap.appendChild(el('p', 'muted small', 'No maintenance windows.')); return; }
+    const tbl = el('table', 'grid mini');
+    const thead = el('thead'), htr = el('tr');
+    ['Name', 'Scope', 'When (UTC)', 'Repeat', 'Status', ''].forEach(h => htr.appendChild(el('th', null, h)));
+    thead.appendChild(htr); tbl.appendChild(thead);
+    const tb = el('tbody');
+    const repeatLbl = { none: 'Once', daily: 'Daily', weekly: 'Weekly' };
+    for (const w of wins) {
+      const tr = el('tr');
+      tr.appendChild(el('td', null, w.name));
+      tr.appendChild(el('td', 'muted', w.scope_label));
+      tr.appendChild(el('td', 'muted small', (w.starts_at || '').slice(0, 16) + ' → ' + (w.ends_at || '').slice(0, 16)));
+      tr.appendChild(el('td', 'muted', repeatLbl[w.recurrence] || w.recurrence));
+      const stTd = el('td');
+      if (!w.is_enabled)     stTd.appendChild(el('span', 'tag tag-st-resolved', 'off'));
+      else if (w.active_now) stTd.appendChild(el('span', 'tag tag-sev-info', 'active'));
+      else                   stTd.appendChild(el('span', 'tag tag-st-acked', 'scheduled'));
+      tr.appendChild(stTd);
+      const act = el('td');
+      act.appendChild(btn('Edit', 'btn-sm btn-ghost', () => openWindowEditor(w)));
+      act.appendChild(btn('Delete', 'btn-sm btn-danger', () => { if (confirm('Delete this window?')) post({ action: 'mw_delete', id: w.id }).then(load); }));
+      tr.appendChild(act);
+      tb.appendChild(tr);
+    }
+    tbl.appendChild(tb); wrap.appendChild(tbl);
+  }
+
+  function fillWindowTargets() {
+    const type = $('mw-scope-type').value;
+    const wrap = $('mw-target-wrap'), sel = $('mw-scope-id');
+    if (type === 'global') { wrap.hidden = true; return; }
+    wrap.hidden = false; sel.textContent = '';
+    const src = { client: data.scopes.clients, site: data.scopes.sites, group: data.scopes.groups, device: data.scopes.agents }[type] || [];
+    for (const o of src) { const opt = el('option', null, o.name); opt.value = o.id; sel.appendChild(opt); }
+  }
+
+  function openWindowEditor(w) {
+    $('mw-editor').hidden = false;
+    $('mw-msg').textContent = '';
+    $('mw-id').value = w ? w.id : '';
+    $('mw-name').value = w ? w.name : '';
+    $('mw-scope-type').value = w ? w.scope_type : 'global';
+    $('mw-enabled').checked = w ? !!w.is_enabled : true;
+    $('mw-recurrence').value = w ? w.recurrence : 'none';
+    $('mw-start').value = w ? (w.starts_at || '').slice(0, 16).replace(' ', 'T') : '';
+    $('mw-end').value = w ? (w.ends_at || '').slice(0, 16).replace(' ', 'T') : '';
+    fillWindowTargets();
+    if (w && w.scope_id) $('mw-scope-id').value = w.scope_id;
+    $('mw-editor').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+
+  async function saveWindow(e) {
+    e.preventDefault();
+    const start = $('mw-start').value, end = $('mw-end').value;
+    if (!start || !end) { $('mw-msg').textContent = 'Set a start and end time (UTC).'; return; }
+    const params = {
+      action: 'mw_save',
+      id: $('mw-id').value || '',
+      name: $('mw-name').value,
+      scope_type: $('mw-scope-type').value,
+      is_enabled: $('mw-enabled').checked ? 1 : 0,
+      starts_at: start,
+      ends_at: end,
+      recurrence: $('mw-recurrence').value
+    };
+    if (params.scope_type !== 'global') params.scope_id = $('mw-scope-id').value || '';
+    const res = await post(params);
+    if (res && res.ok) { $('mw-editor').hidden = true; load(); }
+    else { $('mw-msg').textContent = (res && res.error) ? res.error : 'Save failed.'; }
+  }
+
   // Wire up
   $('filter-tabs').addEventListener('click', (e) => {
     const b = e.target.closest('.seg-btn'); if (!b) return;
@@ -271,6 +392,10 @@ layout_header('Alerts', $user);
   $('rule-cancel').addEventListener('click', () => { $('rule-editor').hidden = true; });
   $('r-scope-type').addEventListener('change', fillTargets);
   $('rule-editor').addEventListener('submit', saveRule);
+  $('mw-add').addEventListener('click', () => openWindowEditor(null));
+  $('mw-cancel').addEventListener('click', () => { $('mw-editor').hidden = true; });
+  $('mw-scope-type').addEventListener('change', fillWindowTargets);
+  $('mw-editor').addEventListener('submit', saveWindow);
 
   load();
   setInterval(load, 20000);

@@ -78,7 +78,8 @@ if ($action === 'rule_save') {
             if ($i++ >= 100) break;
             if (!is_string($k) || !preg_match('/^[a-z][a-z0-9_]{0,39}(:[A-Za-z0-9 :._\-]{1,64})?$/', $k)) continue;
             if (!is_array($v)) continue;
-            $op    = in_array(($v['op'] ?? 'gt'), ['gt', 'lt', 'gte', 'lte', 'eq'], true) ? $v['op'] : 'gt';
+            $opv   = $v['op'] ?? 'gt';
+            $op    = in_array($opv, ['gt', 'lt', 'gte', 'lte', 'eq'], true) ? $opv : 'gt';
             $entry = ['op' => $op];
             if (isset($v['warning'])  && is_numeric($v['warning']))  $entry['warning']  = (float)$v['warning'];
             if (isset($v['critical']) && is_numeric($v['critical'])) $entry['critical'] = (float)$v['critical'];
@@ -126,4 +127,56 @@ if ($action === 'rule_save') {
     json_out(['ok' => true, 'policy_id' => $policyId]);
 }
 
+if ($action === 'mw_save') {
+    $scopeType = (string)($_POST['scope_type'] ?? 'global');
+    if (!in_array($scopeType, ['global', 'client', 'site', 'group', 'device'], true)) json_err('Bad scope', 400);
+    $scopeId = null;
+    if ($scopeType !== 'global') {
+        $scopeId = (int)($_POST['scope_id'] ?? 0);
+        if ($scopeId <= 0) json_err('scope target required', 400);
+        $tbl = ['client' => 'clients', 'site' => 'sites', 'group' => 'device_groups', 'device' => 'agents'][$scopeType];
+        $chk = db()->prepare("SELECT id FROM $tbl WHERE id=?");
+        $chk->execute([$scopeId]);
+        if (!$chk->fetch()) json_err('scope target not found', 404);
+    }
+    $start = mw_normalize_dt((string)($_POST['starts_at'] ?? ''));
+    $end   = mw_normalize_dt((string)($_POST['ends_at'] ?? ''));
+    if ($start === null || $end === null)                 json_err('Valid start and end (UTC) required', 400);
+    if (strtotime($end . ' UTC') <= strtotime($start . ' UTC')) json_err('End must be after start', 400);
+    $recur = in_array(($_POST['recurrence'] ?? 'none'), ['none', 'daily', 'weekly'], true) ? (string)$_POST['recurrence'] : 'none';
+    $name  = mb_substr(trim((string)($_POST['name'] ?? '')), 0, 128);
+    if ($name === '') $name = 'Maintenance';
+    $isEnabled = array_key_exists('is_enabled', $_POST) ? (int)!!$_POST['is_enabled'] : 1;
+
+    $id = (int)($_POST['id'] ?? 0);
+    if ($id > 0) {
+        db()->prepare('UPDATE maintenance_windows SET name=?, scope_type=?, scope_id=?, starts_at=?, ends_at=?, recurrence=?, is_enabled=? WHERE id=?')
+            ->execute([$name, $scopeType, $scopeId, $start, $end, $recur, $isEnabled, $id]);
+    } else {
+        db()->prepare('INSERT INTO maintenance_windows (name, scope_type, scope_id, starts_at, ends_at, recurrence, is_enabled, created_by) VALUES (?,?,?,?,?,?,?,?)')
+            ->execute([$name, $scopeType, $scopeId, $start, $end, $recur, $isEnabled, $uid]);
+        $id = (int)db()->lastInsertId();
+    }
+    audit($uid, null, 'maint_window_save', 'mw#' . $id . ' ' . $scopeType . ($scopeId ? (':' . $scopeId) : ''));
+    json_out(['ok' => true, 'id' => $id]);
+}
+
+if ($action === 'mw_delete') {
+    $id = (int)($_POST['id'] ?? 0);
+    if ($id <= 0) json_err('id required', 400);
+    db()->prepare('DELETE FROM maintenance_windows WHERE id=?')->execute([$id]);
+    audit($uid, null, 'maint_window_delete', 'mw#' . $id);
+    json_out(['ok' => true]);
+}
+
 json_err('Unknown action', 400);
+
+/** Normalize a datetime-local / "Y-m-d H:i" string (interpreted as UTC) to "Y-m-d H:i:s", or null. */
+function mw_normalize_dt(string $v): ?string
+{
+    $v = trim(str_replace('T', ' ', $v));
+    if (!preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}(:\d{2})?$/', $v)) return null;
+    if (strlen($v) === 16) $v .= ':00';
+    $ts = strtotime($v . ' UTC');
+    return $ts !== false ? gmdate('Y-m-d H:i:s', $ts) : null;
+}

@@ -124,5 +124,15 @@ return [
         ],
         'max_attempts'      => 5,   // per-delivery send attempts before it is marked failed
         'offline_after_min' => 10,  // default: alert when an agent has not been seen for this long
+
+        // Optional outbound webhooks — the dispatch cron POSTs one notification per target for each
+        // alert event, alongside email. Each entry: type 'slack'|'discord'|'generic' with an https
+        // 'url', OR type 'telegram' with a bot 'token' + 'chat_id'. URLs MUST be https. [] disables.
+        'webhooks' => [
+            // ['type' => 'slack',    'url'   => 'https://hooks.slack.com/services/XXX/YYY/ZZZ'],
+            // ['type' => 'discord',  'url'   => 'https://discord.com/api/webhooks/XXX/YYY'],
+            // ['type' => 'telegram', 'token' => '123456:ABC-DEF...', 'chat_id' => '-1001234567890'],
+            // ['type' => 'generic',  'url'   => 'https://example.com/milepost-hook'],
+        ],
     ],
 ];

@@ -87,6 +87,30 @@ try {
     }
 } catch (Throwable $e) { $rules = []; }
 
+// ── Maintenance windows (with a computed "active now" flag) ─────────────────────────────────────
+$nowTs   = time();
+$windows = [];
+foreach (maintenance_windows_list() as $w) {
+    $st  = (string)$w['scope_type'];
+    $sid = $w['scope_id'] !== null ? (int)$w['scope_id'] : null;
+    $target = $st === 'client' ? ($cmap[$sid] ?? "#$sid")
+            : ($st === 'site'  ? ($smap[$sid] ?? "#$sid")
+            : ($st === 'group' ? ($gmap[$sid] ?? "#$sid")
+            : ($st === 'device'? ($amap[$sid] ?? "#$sid") : null)));
+    $windows[] = [
+        'id'          => (int)$w['id'],
+        'name'        => (string)$w['name'],
+        'scope_type'  => $st,
+        'scope_id'    => $sid,
+        'scope_label' => $st === 'global' ? 'Global' : (ucfirst($st) . ': ' . $target),
+        'starts_at'   => (string)$w['starts_at'],
+        'ends_at'     => (string)$w['ends_at'],
+        'recurrence'  => (string)$w['recurrence'],
+        'is_enabled'  => (int)$w['is_enabled'],
+        'active_now'  => ((int)$w['is_enabled'] === 1 && mw_is_active_now($w, $nowTs)),
+    ];
+}
+
 // ── Metric catalog + built-in defaults (for the rule editor) ───────────────────────────────────
 $def     = alert_default_thresholds();
 $metrics = [];
@@ -105,6 +129,7 @@ json_out([
     'open_count' => alerts_open_count(),
     'alerts'     => $alerts,
     'rules'      => $rules,
+    'windows'    => $windows,
     'scopes'     => ['clients' => $clients, 'sites' => $sites, 'groups' => $groups, 'agents' => $agents],
     'metrics'    => $metrics,
 ]);

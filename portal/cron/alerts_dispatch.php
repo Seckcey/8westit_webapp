@@ -27,6 +27,7 @@ if (PHP_SAPI !== 'cli') {
 
 require_once __DIR__ . '/../lib/alerts.php';
 require_once __DIR__ . '/../lib/mailer.php';
+require_once __DIR__ . '/../lib/webhook.php';
 
 $line = static function (string $s): void { fwrite(STDOUT, '[' . gmdate('Y-m-d H:i:s') . "Z] $s\n"); };
 
@@ -43,19 +44,20 @@ try {
     $line('offline sweep FAILED: ' . $e->getMessage());
 }
 
-/* ── 2) Drain the email outbox. ──────────────────────────────────────────────────────────────── */
+/* ── 2) Drain the delivery outbox (email + webhook). ─────────────────────────────────────────── */
 $a       = cfg('alerts', []);
 $maxTry  = max(1, (int)($a['max_attempts'] ?? 5));
 $base    = rtrim((string)cfg('base_url', ''), '/');
+$nowTs   = strtotime($now . ' UTC');
 
 $sel = $pdo->prepare(
-    "SELECT d.id, d.alert_id, d.event, d.target, d.attempts,
+    "SELECT d.id, d.alert_id, d.event, d.channel, d.target, d.attempts,
             a.agent_id, a.severity, a.message, a.opened_at, a.resolved_at,
             ag.hostname, ag.display_name
        FROM alert_deliveries d
        JOIN alerts a  ON a.id  = d.alert_id
        JOIN agents ag ON ag.id = a.agent_id
-      WHERE d.channel='email' AND d.status='pending'
+      WHERE d.status='pending'
         AND (d.next_try_at IS NULL OR d.next_try_at <= ?)
       ORDER BY d.id
       LIMIT 100"
@@ -63,22 +65,31 @@ $sel = $pdo->prepare(
 $sel->execute([$now]);
 $rows = $sel->fetchAll();
 
-$sent = 0; $failed = 0; $retry = 0;
+$sent = 0; $failed = 0; $retry = 0; $held = 0;
 $markSent   = $pdo->prepare("UPDATE alert_deliveries SET status='sent', sent_at=?, attempts=attempts+1, last_error='' WHERE id=?");
 $markFailed = $pdo->prepare("UPDATE alert_deliveries SET status='failed', attempts=attempts+1, last_error=? WHERE id=?");
 $markRetry  = $pdo->prepare("UPDATE alert_deliveries SET attempts=attempts+1, last_error=?, next_try_at=? WHERE id=?");
+$markSkip   = $pdo->prepare("UPDATE alert_deliveries SET status='skipped', last_error=? WHERE id=?");
 
 foreach ($rows as $r) {
-    $to = array_values(array_filter(array_map('trim', explode(',', (string)$r['target'])), 'strlen'));
-    if (!$to) {                        // recipients were cleared after enqueue — nothing to send
-        $pdo->prepare("UPDATE alert_deliveries SET status='skipped', last_error='no recipients' WHERE id=?")
-            ->execute([(int)$r['id']]);
-        continue;
-    }
+    // Hold (do not send, do not count an attempt) while the device is in a maintenance window —
+    // it stays pending and is retried once the window ends.
+    if (maintenance_active_for_agent((int)$r['agent_id'], $nowTs)) { $held++; continue; }
+
     [$subject, $body] = alert_email_render($r, (string)$r['event'], $base);
-    $err = null;
+    $channel = (string)$r['channel'];
+    $err = null; $ok = false;
     try {
-        $ok = mailer_send($to, $subject, $body, $err);
+        if ($channel === 'webhook') {
+            $ok = webhook_send((string)$r['target'], $subject, $body, $err);
+        } else {
+            $to = array_values(array_filter(array_map('trim', explode(',', (string)$r['target'])), 'strlen'));
+            if (!$to) {                       // recipients cleared after enqueue — nothing to send
+                $markSkip->execute(['no recipients', (int)$r['id']]);
+                continue;
+            }
+            $ok = mailer_send($to, $subject, $body, $err);
+        }
     } catch (Throwable $e) {
         $ok = false; $err = $e->getMessage();
     }
@@ -99,7 +110,7 @@ foreach ($rows as $r) {
         }
     }
 }
-$line("email outbox: sent={$sent} retry={$retry} failed={$failed} (scanned=" . count($rows) . ')');
+$line("outbox: sent={$sent} retry={$retry} failed={$failed} held={$held} (scanned=" . count($rows) . ')');
 $line('done.');
 
 /** Build [subject, body] for one delivery row (alert joined to agent). */
