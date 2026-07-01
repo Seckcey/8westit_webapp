@@ -4,6 +4,7 @@
  * Mirrors the agent_live.php convention: enforce_https, 401 if not logged in, json_out.
  */
 declare(strict_types=1);
+require_once __DIR__ . '/../lib/auth.php';    // current_user() lives here (alerts.php alone does NOT pull it in)
 require_once __DIR__ . '/../lib/alerts.php';
 enforce_https();
 if (!current_user()) json_err('Unauthorized', 401);

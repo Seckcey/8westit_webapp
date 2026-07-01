@@ -10,6 +10,11 @@
 #   Header always set X-Content-Type-Options "nosniff"
 # Test after adding each — if you get a 500, that directive isn't permitted.
 
+# Serve index.php at the directory root. Some HostGator accounts' DEFAULT DirectoryIndex omits
+# index.php, so the bare domain (support.8westit.com/) finds no index file and returns 403 while
+# /index.php works. DirectoryIndex is a mod_dir directive HostGator permits (unlike Options/Header).
+DirectoryIndex index.php index.html
+
 <IfModule mod_rewrite.c>
   RewriteEngine On
   RewriteCond %{HTTP:Authorization} .

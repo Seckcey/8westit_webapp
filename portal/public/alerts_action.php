@@ -6,6 +6,7 @@
  *   action=rule_delete            policy_id=<policy_id>
  */
 declare(strict_types=1);
+require_once __DIR__ . '/../lib/auth.php';    // current_user()/csrf_check() live here (alerts.php alone does NOT pull them in)
 require_once __DIR__ . '/../lib/alerts.php';
 enforce_https();
 $user = current_user();
