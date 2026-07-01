@@ -53,7 +53,7 @@ CREATE TABLE IF NOT EXISTS alerts (
   compare_op    ENUM('gt','lt','gte','lte','eq')  NOT NULL DEFAULT 'gt',
   threshold     DOUBLE          NULL,
   trigger_value DOUBLE          NULL,           /* value that first opened the alert */
-  last_value    DOUBLE          NULL,           /* most recent evaluated value */
+  last_val      DOUBLE          NULL,           /* most recent evaluated value (last_value is a MySQL-8 reserved word) */
   message       VARCHAR(255)    NOT NULL DEFAULT '',
   opened_at     DATETIME        NOT NULL,
   acked_at      DATETIME        NULL,
@@ -78,7 +78,7 @@ CREATE TABLE IF NOT EXISTS alert_state (
   breach_level ENUM('none','warning','critical') NOT NULL DEFAULT 'none',
   breach_since DATETIME     NULL,   /* first sample of the current consecutive breach; NULL when clear */
   clear_since  DATETIME     NULL,   /* first clear sample while an alert is still open (auto-resolve timer) */
-  last_value   DOUBLE       NULL,
+  last_val     DOUBLE       NULL,
   last_eval_at DATETIME     NULL,
   PRIMARY KEY (agent_id, rule_key),
   CONSTRAINT fk_astate_agent FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE

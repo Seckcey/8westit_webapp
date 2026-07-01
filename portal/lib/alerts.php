@@ -173,11 +173,11 @@ function alerts_apply(PDO $pdo, int $agentId, string $ruleKey, string $mk, strin
             alert_enqueue($pdo, $id, 'open');
         } elseif ($level === 'critical' && $active['severity'] !== 'critical') {
             $msg = alert_message($mk, $inst, $val, $thr, $rule['op']);
-            $pdo->prepare('UPDATE alerts SET severity=?, threshold=?, last_value=?, message=? WHERE id=?')
+            $pdo->prepare('UPDATE alerts SET severity=?, threshold=?, last_val=?, message=? WHERE id=?')
                 ->execute(['critical', $thr, $val, $msg, (int)$active['id']]);
             alert_enqueue($pdo, (int)$active['id'], 'escalate');
         } else {
-            $pdo->prepare('UPDATE alerts SET last_value=? WHERE id=?')->execute([$val, (int)$active['id']]);
+            $pdo->prepare('UPDATE alerts SET last_val=? WHERE id=?')->execute([$val, (int)$active['id']]);
         }
     } else {
         // Cleared: auto-resolve only after the value has been good for the clear window (hysteresis).
@@ -189,7 +189,7 @@ function alerts_apply(PDO $pdo, int $agentId, string $ruleKey, string $mk, strin
                 alert_resolve($pdo, (int)$active['id'], $val, $now);
                 alert_enqueue($pdo, (int)$active['id'], 'resolve');
             } else {
-                $pdo->prepare('UPDATE alerts SET last_value=? WHERE id=?')->execute([$val, (int)$active['id']]);
+                $pdo->prepare('UPDATE alerts SET last_val=? WHERE id=?')->execute([$val, (int)$active['id']]);
             }
         } else {
             alert_state_upsert($pdo, $agentId, $ruleKey, 'none', null, null, $val, $now);
@@ -201,10 +201,10 @@ function alert_state_upsert(PDO $pdo, int $agentId, string $ruleKey, string $lev
                             ?string $breachSince, ?string $clearSince, ?float $val, string $now): void
 {
     $pdo->prepare(
-        'INSERT INTO alert_state (agent_id, rule_key, breach_level, breach_since, clear_since, last_value, last_eval_at)
+        'INSERT INTO alert_state (agent_id, rule_key, breach_level, breach_since, clear_since, last_val, last_eval_at)
          VALUES (?,?,?,?,?,?,?)
          ON DUPLICATE KEY UPDATE breach_level=VALUES(breach_level), breach_since=VALUES(breach_since),
-           clear_since=VALUES(clear_since), last_value=VALUES(last_value), last_eval_at=VALUES(last_eval_at)'
+           clear_since=VALUES(clear_since), last_val=VALUES(last_val), last_eval_at=VALUES(last_eval_at)'
     )->execute([$agentId, $ruleKey, $level, $breachSince, $clearSince, $val, $now]);
 }
 
@@ -213,7 +213,7 @@ function alert_insert(PDO $pdo, int $agentId, string $ruleKey, string $mk, strin
 {
     $pdo->prepare(
         "INSERT INTO alerts (agent_id, rule_key, metric_key, instance, severity, status, compare_op,
-                             threshold, trigger_value, last_value, message, opened_at)
+                             threshold, trigger_value, last_val, message, opened_at)
          VALUES (?,?,?,?,?,'open',?,?,?,?,?,?)"
     )->execute([$agentId, $ruleKey, $mk, $inst, $sev, $op, $thr, $val, $val, mb_substr($msg, 0, 255), $now]);
     return (int)$pdo->lastInsertId();
@@ -221,7 +221,7 @@ function alert_insert(PDO $pdo, int $agentId, string $ruleKey, string $mk, strin
 
 function alert_resolve(PDO $pdo, int $alertId, ?float $val, string $now): void
 {
-    $pdo->prepare("UPDATE alerts SET status='resolved', last_value=?, resolved_at=? WHERE id=? AND status<>'resolved'")
+    $pdo->prepare("UPDATE alerts SET status='resolved', last_val=?, resolved_at=? WHERE id=? AND status<>'resolved'")
         ->execute([$val, $now, $alertId]);
 }
 
@@ -358,7 +358,7 @@ function alerts_list(string $status = 'active', int $limit = 200): array
     if ($status === 'resolved') $where = "a.status='resolved'";
     elseif ($status === 'all')  $where = '1=1';
     $sql = "SELECT a.id, a.agent_id, a.rule_key, a.metric_key, a.instance, a.severity, a.status,
-                   a.threshold, a.trigger_value, a.last_value, a.message,
+                   a.threshold, a.trigger_value, a.last_val, a.message,
                    a.opened_at, a.acked_at, a.resolved_at,
                    ag.hostname, ag.display_name, u.username AS acked_by_name
               FROM alerts a

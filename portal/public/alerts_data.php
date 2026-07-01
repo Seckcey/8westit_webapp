@@ -29,7 +29,7 @@ foreach (alerts_list($status, 300) as $r) {
         'severity'    => (string)$r['severity'],
         'status'      => (string)$r['status'],
         'threshold'   => $r['threshold']  !== null ? (float)$r['threshold']  : null,
-        'last_value'  => $r['last_value'] !== null ? (float)$r['last_value'] : null,
+        'last_val'  => $r['last_val'] !== null ? (float)$r['last_val'] : null,
         'message'     => (string)$r['message'],
         'opened_at'   => (string)$r['opened_at'],
         'age_secs'    => $opened !== null ? max(0, $now - $opened) : null,
