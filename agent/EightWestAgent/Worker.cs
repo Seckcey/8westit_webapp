@@ -32,7 +32,7 @@ namespace EightWest.Agent
                     return v.Major + "." + v.Minor + "." + (v.Build < 0 ? 0 : v.Build);
             }
             catch { /* fall through to the literal */ }
-            return "1.2.0";
+            return "1.3.0";
         }
 
         private readonly ManualResetEvent _stop = new ManualResetEvent(false);
@@ -85,6 +85,7 @@ namespace EightWest.Agent
             {
                 _cfg = Config.Load();
                 _state = AgentState.Load();
+                PatchManager.Init(_cfg.PortalUrl, () => _state.AuthToken);   // patch jobs self-report
                 Log.Info($"Agent {Version} starting. Portal={_cfg.PortalUrl}");
 
                 // Startup self-heal: if a prior update swapped the on-disk binary but the
@@ -430,6 +431,45 @@ namespace EightWest.Agent
                     continue;
                 }
 
+                // Patch jobs are handled here in the Worker (which owns the API + PatchManager
+                // reporting), not in JobRunner. Installs run on a BACKGROUND thread so a long
+                // download/install never stalls the heartbeat loop (the agent stays online).
+                if (type == "patch_scan" || type == "patch_install")
+                {
+                    if (id != 0) _state.MarkJobSeen(id);
+                    if (type == "patch_install")
+                    {
+                        int jobId = id; string kb = payload;
+                        new Thread(() =>
+                        {
+                            JobResult pr;
+                            JobRunner.ExecGate.Wait();
+                            try { pr = new JobResult { Success = true, ExitCode = 0, Output = PatchManager.Install(kb) }; }
+                            catch (Exception ex) { pr = new JobResult { Success = false, ExitCode = -1, Output = "Install error: " + ex.Message }; }
+                            finally { JobRunner.ExecGate.Release(); }
+                            try
+                            {
+                                new ApiClient(_cfg.PortalUrl, _state.AuthToken).Post("/api/jobs.php", new Dictionary<string, object>
+                                { ["job_id"] = jobId, ["status"] = pr.Success ? "done" : "error", ["exit_code"] = pr.ExitCode, ["output"] = pr.Output });
+                            }
+                            catch (Exception ex) { Log.Warn("patch_install result report failed: " + ex.Message); }
+                        })
+                        { IsBackground = true, Name = "PatchInstall" }.Start();
+                        Log.Info($"patch_install job {id} started (background thread).");
+                    }
+                    else // patch_scan — quick, run inline
+                    {
+                        JobResult pr;
+                        JobRunner.ExecGate.Wait();
+                        try { pr = new JobResult { Success = true, ExitCode = 0, Output = PatchManager.ScanAndReport() }; }
+                        catch (Exception ex) { pr = new JobResult { Success = false, ExitCode = -1, Output = "Scan error: " + ex.Message }; }
+                        finally { JobRunner.ExecGate.Release(); }
+                        _api.Post("/api/jobs.php", new Dictionary<string, object>
+                        { ["job_id"] = id, ["status"] = pr.Success ? "done" : "error", ["exit_code"] = pr.ExitCode, ["output"] = pr.Output });
+                    }
+                    continue;
+                }
+
                 Log.Info($"Running job {id} ({type})");
 
                 // Single-flight across BOTH paths (shared with RealtimeClient): a poll job
@@ -465,7 +505,7 @@ namespace EightWest.Agent
         {
             try
             {
-                _api.Post("/api/patch_report.php", PatchManager.Scan());
+                PatchManager.ScanAndReport();
                 _lastPatchScan = DateTime.UtcNow;
                 Log.Info("Patch scan reported.");
             }

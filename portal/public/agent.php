@@ -93,6 +93,32 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
                 $flash = 'Update to ' . $gt . ' queued for this endpoint.';
             }
         }
+    } elseif ($action === 'patch_scan') {
+        // On-demand Windows Update scan (read-only; login-only). Queued job the agent runs at check-in.
+        db()->prepare('INSERT INTO jobs (agent_id, created_by, job_type, payload) VALUES (?,?,\'patch_scan\',\'\')')
+            ->execute([$id, $user['id']]);
+        audit((int)$user['id'], $id, 'patch_scan', '');
+        $flash = 'Windows Update scan queued — results appear within a minute.';
+    } elseif ($action === 'patch_install') {
+        // Install selected updates (DESTRUCTIVE → admin-only; the human click is the approval).
+        if (($user['role'] ?? '') !== 'admin') {
+            $flash = 'Only admins can install updates.';
+        } else {
+            $kbs = [];
+            foreach ((array)($_POST['kb'] ?? []) as $k) {
+                $k = strtoupper(trim((string)$k));
+                if (preg_match('/^KB[0-9]{4,10}$/', $k) && !in_array($k, $kbs, true)) $kbs[] = $k;
+                if (count($kbs) >= 100) break;
+            }
+            if (!$kbs) {
+                $flash = 'No updates selected.';
+            } else {
+                db()->prepare('INSERT INTO jobs (agent_id, created_by, job_type, payload) VALUES (?,?,\'patch_install\',?)')
+                    ->execute([$id, $user['id'], implode(',', $kbs)]);
+                audit((int)$user['id'], $id, 'patch_install', count($kbs) . ' KBs: ' . implode(',', $kbs));
+                $flash = count($kbs) . ' update(s) queued to install — this can take several minutes. Use "Scan now" afterward to refresh.';
+            }
+        }
     } elseif ($action === 'archive') {
         db()->prepare('UPDATE agents SET is_archived=1 WHERE id=?')->execute([$id]);
         audit((int)$user['id'], $id, 'archive', '');
@@ -273,7 +299,16 @@ $pComp    = ($patch && $patch['compliance_pct'] !== null) ? (float)$patch['compl
 $pList    = $patch ? (json_decode((string)$patch['pending_json'], true) ?: []) : [];
 ?>
 <section class="card">
-  <h3>Patch status<?php if ($patch): ?> <small class="muted">scanned <?= e(time_ago($patch['last_scan_at'])) ?></small><?php endif; ?></h3>
+  <div class="card-head">
+    <h3>Patch status<?php if ($patch): ?> <small class="muted">scanned <?= e(time_ago($patch['last_scan_at'])) ?></small><?php endif; ?></h3>
+    <?php if (patch_enabled()): ?>
+      <form method="post" style="margin:0">
+        <input type="hidden" name="csrf" value="<?= e($csrf) ?>">
+        <input type="hidden" name="action" value="patch_scan">
+        <button class="btn-sm btn-ghost">Scan now</button>
+      </form>
+    <?php endif; ?>
+  </div>
   <?php if (!patch_enabled()): ?>
     <p class="muted">Patch management is off. Enable it in <code>config.php</code> (<code>patch.enabled</code>) to collect Windows Update status.</p>
   <?php elseif (!$patch): ?>
@@ -286,19 +321,32 @@ $pList    = $patch ? (json_decode((string)$patch['pending_json'], true) ?: []) :
       <?php if ($pComp !== null): ?><span class="pill">compliance <b><?= e(rtrim(rtrim(number_format($pComp, 1), '0'), '.')) ?>%</b></span><?php endif; ?>
     </div>
     <?php if ($pList): ?>
-      <table class="grid mini" style="margin-top:14px">
-        <thead><tr><th>Update</th><th>KB</th><th>Classification</th><th>Severity</th></tr></thead>
-        <tbody>
-        <?php foreach (array_slice($pList, 0, 100) as $u): ?>
-          <tr>
-            <td><?= e((string)($u['title'] ?? '')) ?></td>
-            <td class="muted"><?= e((string)($u['kb'] ?? '')) ?></td>
-            <td class="muted small"><?= e((string)($u['classification'] ?? '')) ?></td>
-            <td class="muted small"><?= e((string)($u['severity'] ?? '')) ?></td>
-          </tr>
-        <?php endforeach; ?>
-        </tbody>
-      </table>
+      <form method="post">
+        <input type="hidden" name="csrf" value="<?= e($csrf) ?>">
+        <input type="hidden" name="action" value="patch_install">
+        <table class="grid mini" style="margin-top:14px">
+          <thead><tr><th style="width:34px"></th><th>Update</th><th>KB</th><th>Classification</th><th>Severity</th></tr></thead>
+          <tbody>
+          <?php foreach (array_slice($pList, 0, 100) as $u): $ukb = strtoupper(trim((string)($u['kb'] ?? ''))); ?>
+            <tr>
+              <td><?php if (preg_match('/^KB[0-9]{4,10}$/', $ukb)): ?><input type="checkbox" name="kb[]" value="<?= e($ukb) ?>"><?php endif; ?></td>
+              <td><?= e((string)($u['title'] ?? '')) ?></td>
+              <td class="muted"><?= e((string)($u['kb'] ?? '')) ?></td>
+              <td class="muted small"><?= e((string)($u['classification'] ?? '')) ?></td>
+              <td class="muted small"><?= e((string)($u['severity'] ?? '')) ?></td>
+            </tr>
+          <?php endforeach; ?>
+          </tbody>
+        </table>
+        <?php if (($user['role'] ?? '') === 'admin'): ?>
+          <div class="rule-editor-actions">
+            <button class="btn-sm btn-primary" onclick="return confirm('Install the selected updates on this device now? It runs in the background and may require a reboot afterward.');">Install selected</button>
+            <span class="muted small">Installs run in the background (can take minutes). Reboot is manual — use Run a command → restart.</span>
+          </div>
+        <?php else: ?>
+          <p class="muted small" style="margin-top:10px">Only admins can install updates.</p>
+        <?php endif; ?>
+      </form>
     <?php endif; ?>
   <?php endif; ?>
 </section>

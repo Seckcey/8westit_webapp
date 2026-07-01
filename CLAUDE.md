@@ -108,8 +108,16 @@ Tagline: *"Every endpoint, every mile."* Live in production. **This GitHub repo 
   on startup + a timer, POSTs to `api/patch_report.php`, gated by a heartbeat `patch` directive that appears only when
   `config.php` `patch.enabled` is on. Portal: `agent_patch_status` table (migration `2026-07-02_phase3_patch.sql`),
   `lib/patch.php`, a Patch card on `agent.php`, a fleet badge on `index.php`. Chosen rollback approach (built later) =
-  best-effort per-KB DISM/wusa uninstall + honest "not reversible" flags. DEPLOY = import migration → upload portal files →
-  build+ship the 1.2.0 agent templates → flip `patch.enabled` → canary DESKTOP-UNAR4O1. **Next increments: (2) install +
-  ring rollout (`patch_settings` policy key + rollout cron + maintenance-window install gate); (3) rollback + auto-halt.**
+  best-effort per-KB DISM/wusa uninstall + honest "not reversible" flags.
+- **Phase 3 increment 2a — manual, human-approved patch INSTALL: BUILT + tested, NOT yet deployed (2026-07-02).** **Agent
+  1.3.0** adds `PatchManager.Install(kbCsv)` (WUA COM download+install of selected KBs, runs on a BACKGROUND thread so a
+  long install never stalls the heartbeat, re-scans + self-reports after) + on-demand `patch_scan`/`patch_install` job
+  handling in `Worker.DrainJobs`. Portal: migration `2026-07-02_phase3_patch_install.sql` (appends `patch_scan`,`patch_install`
+  to `jobs.job_type`); `agent.php` Patch card gains per-update checkboxes + "Install selected" (admin-only, KB-sanitized) +
+  "Scan now". No automation, no auto-reboot (reboot stays a manual `restart` job) — the human click IS the approval; the
+  actual WUA install is destructive so it's canary-validated, not locally testable. DEPLOY = import both patch migrations →
+  upload portal files → ship the 1.3.0 templates → canary. **Remaining: (2b) ring-rollout AUTOMATION (`patch_settings` policy
+  key stripped from agent payload like thresholds, `patch_rollouts` tables, rollout cron state machine, maintenance-window
+  install gate, auto-approve + reboot policy — the destructive-automation decisions live here); (3) rollback + auto-halt.**
 - Roadmap doc: `8 West IT/Milepost-Product-Roadmap.docx` (9 phases). Phase 3 = patch management (ring rollout + rollback).
 - Deep project history, deploy specifics, and lessons live in the Claude memory files (`8west-rmm-project.md`).

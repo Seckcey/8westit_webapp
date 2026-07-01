@@ -53,6 +53,102 @@ foreach($p in @('HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based
             }
         }
 
+        // Set once by Worker (after enroll) so the scan/install JOBS can self-report to the portal.
+        private static string _portalUrl;
+        private static Func<string> _token;
+        public static void Init(string portalUrl, Func<string> tokenProvider)
+        {
+            _portalUrl = portalUrl;
+            _token = tokenProvider;
+        }
+
+        /// <summary>Scan Windows Update and POST the result to /api/patch_report.php; returns a summary.</summary>
+        public static string ScanAndReport()
+        {
+            var report = Scan();
+            Report(report);
+            var pending = report.ContainsKey("pending") ? report["pending"] as System.Collections.ICollection : null;
+            return "Scan complete: " + (pending?.Count ?? 0) + " update(s) pending.";
+        }
+
+        private static void Report(Dictionary<string, object> report)
+        {
+            if (string.IsNullOrEmpty(_portalUrl) || _token == null) return;
+            try { new ApiClient(_portalUrl, _token()).Post("/api/patch_report.php", report); }
+            catch (Exception ex) { Log.Warn("Patch report failed: " + ex.Message); }
+        }
+
+        /// <summary>
+        /// Install the given KBs ("KB5049999,KB5000002") via WUA (download + install), then re-scan +
+        /// report so the portal refreshes. Long-running; the caller runs this OFF the heartbeat loop.
+        /// Never reboots — the summary reports whether a reboot is required. Never throws.
+        /// </summary>
+        public static string Install(string kbCsv)
+        {
+            var kbs = SanitizeKbs(kbCsv);
+            if (kbs.Count == 0) return "No valid KBs requested.";
+            try
+            {
+                var json = RunPowerShell(InstallScript(string.Join(",", kbs)), 60 * 60 * 1000);   // up to 60 min
+                var res = new JavaScriptSerializer { MaxJsonLength = 16_000_000 }
+                    .Deserialize<Dictionary<string, object>>(json ?? "");
+                string summary;
+                if (res == null) summary = "Install finished (no result returned).";
+                else
+                {
+                    int code = res.ContainsKey("result_code") ? Convert.ToInt32(res["result_code"]) : -1;
+                    bool reboot = res.ContainsKey("reboot_required") && Convert.ToBoolean(res["reboot_required"]);
+                    // WUA OperationResultCode: 0=none matched, 2=Succeeded, 3=SucceededWithErrors, 4=Failed, 5=Aborted.
+                    string status = code == 2 ? "succeeded"
+                                  : code == 3 ? "succeeded with errors"
+                                  : code == 0 ? "no matching updates found"
+                                  : "failed (code " + code + ")";
+                    summary = "Install " + status + " for " + kbs.Count + " update(s)." + (reboot ? " REBOOT REQUIRED." : "");
+                }
+                ScanAndReport();   // refresh the portal's patch status after the install
+                return summary;
+            }
+            catch (Exception ex)
+            {
+                Log.Warn("Patch install failed: " + ex.Message);
+                return "Install failed: " + ex.Message;
+            }
+        }
+
+        // Accept ONLY KB<digits> tokens — this list is injected into the install PowerShell.
+        private static List<string> SanitizeKbs(string csv)
+        {
+            var list = new List<string>();
+            foreach (var raw in (csv ?? "").Split(','))
+            {
+                var t = raw.Trim().ToUpperInvariant();
+                if (System.Text.RegularExpressions.Regex.IsMatch(t, "^KB[0-9]{4,10}$") && !list.Contains(t))
+                    list.Add(t);
+            }
+            return list;
+        }
+
+        private static string InstallScript(string kbList) => @"
+$ErrorActionPreference='Stop'
+$ProgressPreference='SilentlyContinue'
+$want='" + kbList + @"'.Split(',') | ForEach-Object { $_.Trim().ToUpper() } | Where-Object { $_ }
+$session=New-Object -ComObject Microsoft.Update.Session
+$searcher=$session.CreateUpdateSearcher()
+$r=$searcher.Search('IsInstalled=0 and IsHidden=0')
+$coll=New-Object -ComObject Microsoft.Update.UpdateColl
+foreach($u in $r.Updates){
+  $kbs=@($u.KBArticleIDs | ForEach-Object {'KB'+$_.ToUpper()})
+  if(@($kbs | Where-Object { $want -contains $_ }).Count -gt 0){
+    if(-not $u.EulaAccepted){ try { $u.AcceptEula() } catch {} }
+    [void]$coll.Add($u)
+  }
+}
+if($coll.Count -eq 0){ [PSCustomObject]@{ result_code=0; reboot_required=$false } | ConvertTo-Json -Compress; exit 0 }
+$dl=$session.CreateUpdateDownloader(); $dl.Updates=$coll; [void]$dl.Download()
+$inst=$session.CreateUpdateInstaller(); $inst.Updates=$coll; $res=$inst.Install()
+[PSCustomObject]@{ result_code=[int]$res.ResultCode; reboot_required=[bool]$res.RebootRequired } | ConvertTo-Json -Compress
+";
+
         private static Dictionary<string, object> Empty() =>
             new Dictionary<string, object> { ["pending"] = new List<object>(), ["reboot_pending"] = false };
 
