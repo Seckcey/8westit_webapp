@@ -86,14 +86,14 @@ Tagline: *"Every endpoint, every mile."* Live in production. **This GitHub repo 
 - Commit/push only when asked. End commit messages with a `Co-Authored-By: Claude …` line.
 
 ## Status & roadmap
-- **Phase 1** (real-time foundation) and **Phase 2 monitoring** (telemetry backbone + wider metrics) are DONE and LIVE.
-- **Phase 2 "smart alerting" — Step 3 CORE: BUILT + adversarially reviewed + locally tested, NOT yet deployed**
-  (2026-07-01). Portal-only (no agent/RT-backend change). Threshold engine on the policy inheritance engine +
+- **Phase 1** (real-time foundation) and **Phase 2** (monitoring + smart alerting) are DONE and LIVE.
+- **Phase 2 "smart alerting" — Step 3 CORE: DONE + LIVE in production (2026-07-01)**, verified end-to-end (a real
+  built-in-default disk alert emailed successfully). Portal-only. Threshold engine on the policy inheritance engine +
   alert lifecycle (open→ack→resolve) + email/in-app delivery + Alerts UI. Migration
-  `db/migrations/2026-07-01_phase2_alerting.sql`. **Deferred to fast-follow: maintenance windows + webhook
-  (Slack/Discord/Telegram) delivery.** DEPLOY = import migration → delete-then-upload portal files → set
-  `config.php` `alerts{enabled,email_to,smtp}` (needs cPanel 2FA) → add 1-min cron for `cron/alerts_dispatch.php`
-  → flip `alerts.enabled`.
+  `db/migrations/2026-07-01_phase2_alerting.sql`. Mail via HostGator's local Exim (`alerts.smtp` host `localhost`:25,
+  `secure`=`''`, no auth). **Deferred fast-follow: maintenance windows + webhook (Slack/Discord/Telegram).**
+  GOTCHA burned in: `last_value` is a MySQL-8 reserved word (LAST_VALUE window fn) → column renamed `last_val`
+  (MariaDB didn't flag it locally — audit new identifiers against the 8.0 reserved-word list, esp. window-fn words).
 - Roadmap doc: `8 West IT/Milepost-Product-Roadmap.docx` (9 phases). After Step 3: **Phase 3 = patch management**
   (ring rollout + rollback).
 - Deep project history, deploy specifics, and lessons live in the Claude memory files (`8west-rmm-project.md`).
