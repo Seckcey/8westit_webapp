@@ -95,4 +95,34 @@ return [
         'hour_days' => 90,   // hourly rollups
         'day_days'  => 730,  // daily rollups (~2 years)
     ],
+
+    // --- Smart alerting (Phase 2, Step 3) ---
+    // HARD KILL-SWITCH — DEFAULT OFF. While 'enabled' is false, metrics_snapshot.php evaluates NO
+    // thresholds and the dispatch cron sends nothing, so importing the alerting migration + shipping
+    // the code is a no-op until you flip this (mirrors realtime.enabled / agent_update.enabled).
+    //
+    // Thresholds themselves are NOT here — they live in policy docs (Alerts > Rules in the UI),
+    // inherited Client->Site->Group->Device by lib/policy.php, with a built-in floor in lib/alerts.php
+    // so alerting works out-of-the-box. This block is only the DELIVERY + evaluation switch.
+    //
+    // Channels for this step: in-app (always, when enabled) + email. Leave 'email_to' empty for
+    // in-app-only (alerts still open/resolve and show in the portal; no mail is queued). When
+    // 'smtp.host' is empty the mailer falls back to PHP mail() (fine for a quick start; real SMTP
+    // creds deliver far more reliably from HostGator). Add the 1-min cron for near-real-time MTTA:
+    //   * * * * * /usr/local/bin/php /home/qygiabte/public_html/8westit/cron/alerts_dispatch.php
+    'alerts' => [
+        'enabled'   => false,                       // master gate; false = no evaluation, no delivery
+        'email_to'  => [],                          // recipients, e.g. ['ops@8westit.com']; [] = in-app only
+        'from'      => 'milepost-alerts@8westit.com',
+        'from_name' => 'Milepost Alerts',
+        'smtp' => [
+            'host'   => '',        // e.g. 'mail.8westit.com'; empty = use PHP mail()
+            'port'   => 587,       // 587 for STARTTLS, 465 for implicit SSL, 25 for none
+            'secure' => 'tls',     // 'tls' (STARTTLS) | 'ssl' (implicit) | '' (none)
+            'user'   => '',
+            'pass'   => '',
+        ],
+        'max_attempts'      => 5,   // per-delivery send attempts before it is marked failed
+        'offline_after_min' => 10,  // default: alert when an agent has not been seen for this long
+    ],
 ];

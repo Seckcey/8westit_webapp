@@ -31,8 +31,13 @@ try {
     db()->prepare('UPDATE agents SET policy_etag=? WHERE id=?')->execute([$res['etag'], $agentId]);
 } catch (Throwable $e) { /* column not present yet */ }
 
+// `thresholds` is a server-side alerting concern — the agent evaluates nothing from it, so keep it
+// out of the agent-facing payload (the etag already excludes it, so this never causes a refetch).
+$effective = $res['effective'];
+unset($effective['thresholds']);
+
 json_out([
     'ok'          => true,
     'policy_etag' => $res['etag'],
-    'effective'   => $res['effective'],
+    'effective'   => $effective,
 ]);

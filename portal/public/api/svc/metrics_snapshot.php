@@ -14,6 +14,7 @@
  */
 declare(strict_types=1);
 require_once __DIR__ . '/../../../lib/svc_auth.php';
+require_once __DIR__ . '/../../../lib/alerts.php';
 enforce_https();
 
 if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') json_err('POST required', 405);
@@ -128,6 +129,22 @@ if ($histRows) {
         // loss is visible to ops (the presence/agent_metrics_latest critical path already committed).
         error_log('metrics_snapshot: history insert failed after commit: ' . $e->getMessage());
         $historied = 0;
+    }
+}
+
+// ── Smart alerting (Phase 2 Step 3): evaluate the just-arrived samples against each device's
+//    effective thresholds. Best-effort and fully decoupled — it runs AFTER the metrics commit and
+//    history write, only opens/resolves alert rows + enqueues notifications (the every-minute cron
+//    sends them), and a failure here never affects presence, metrics, or this response.
+if (alerts_enabled() && $histRows) {
+    try {
+        $byAgent = [];
+        foreach ($histRows as $r) { $byAgent[$r[0]][] = [$r[1], $r[2], $r[3]]; }
+        foreach ($byAgent as $aid => $vals) {
+            alerts_evaluate($pdo, (int)$aid, $vals, $sampledAt);
+        }
+    } catch (Throwable $e) {
+        error_log('metrics_snapshot: alert evaluation failed after commit: ' . $e->getMessage());
     }
 }
 

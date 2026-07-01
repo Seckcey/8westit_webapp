@@ -2,9 +2,10 @@
 /** Shared HTML layout + small view helpers for the dashboard. */
 declare(strict_types=1);
 require_once __DIR__ . '/auth.php';
+require_once __DIR__ . '/alerts.php';
 
 /** Cache-busting version for static assets. Hand-bump on css/js changes. */
-if (!defined('MP_ASSET_VER')) define('MP_ASSET_VER', '20260701b');
+if (!defined('MP_ASSET_VER')) define('MP_ASSET_VER', '20260701c');
 
 /** Online if seen within 2.5x its heartbeat interval. */
 function agent_is_online(array $a): bool
@@ -52,6 +53,8 @@ function layout_header(string $title, ?array $user): void
   <nav class="topnav">
     <a href="index.php">Dashboard</a>
     <a href="clients.php">Clients</a>
+    <?php $openAlerts = $u ? alerts_open_count() : 0; ?>
+    <a href="alerts.php" class="nav-alerts">Alerts<?php if ($openAlerts > 0): ?><span class="nav-badge"><?= (int)$openAlerts ?></span><?php endif; ?></a>
     <a href="deploy.php">Deploy&nbsp;Agent</a>
     <?php if ($u && ($u['role'] ?? '') === 'admin'): ?>
       <a href="users.php">Users</a>

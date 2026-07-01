@@ -134,7 +134,12 @@ function effective_policy_for_agent(int $agentId): array
         }
     }
 
-    return ['effective' => $eff, 'etag' => policy_etag($eff)];
+    // The etag drives the agent/backend policy refetch. `thresholds` is a SERVER-SIDE concern
+    // (evaluated in metrics_snapshot.php; the agent never acts on it), so exclude it from the etag
+    // — editing an alert threshold must not force every agent to re-pull its policy.
+    $forEtag = $eff;
+    unset($forEtag['thresholds']);
+    return ['effective' => $eff, 'etag' => policy_etag($forEtag)];
 }
 
 /** Short, stable 12-char tag for an effective-policy array (fits agents.policy_etag CHAR(12)). */

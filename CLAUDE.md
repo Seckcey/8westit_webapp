@@ -47,14 +47,26 @@ Tagline: *"Every endpoint, every mile."* Live in production. **This GitHub repo 
   `EightWestAgent.csproj` **and** `Product.wxs` together; don't hardcode a version string anywhere.
 - Front-end is vanilla JS (no build step); build DOM from server data with `textContent`/`createElement`
   (never inject server strings into `innerHTML`). UI follows the Milepost design language (calm, soft corners; navy/red/blue).
+- **Alerting** (Phase 2 Step 3): metric thresholds live in policy `doc_json` under a `thresholds` key
+  (inherited Client→Site→Group→Device by `lib/policy.php`, with a built-in floor in `lib/alerts.php`).
+  `thresholds` is server-only — `agent_policy.php` strips it and `policy.php` excludes it from the policy etag
+  (don't send it to agents / don't let it churn agent policy refetch). Detection runs best-effort in
+  `metrics_snapshot.php` AFTER the sacred presence/metrics commit; it only enqueues into `alert_deliveries`.
+  The 1-min `cron/alerts_dispatch.php` sends email (`lib/mailer.php`, a hand-rolled SMTP client — no composer)
+  and runs the offline sweep. All gated by `config.php` `alerts.enabled` (default off).
 
 ## Build / test / run
 - Agent: `dotnet build agent/EightWestAgent/EightWestAgent.csproj -c Release` (net48).
   MSI templates (for the portal to serve): `agent/build-templates.ps1` → `agent/dist/templates/agent-template-{lite,full}.msi`.
 - RT backend tests: `cd realtime/backend && node --test`.
-- Local test DB (no local PHP; PHP was only on the live server): **MariaDB 12.3** on port 3307 —
+- Local test DB: **MariaDB 12.3** on port 3307 —
   `"C:\Program Files\MariaDB 12.3\bin\mariadbd.exe" --datadir=C:\mdbtest\data --port=3307` (passwordless root, no service).
   Validate migrations there, but remember MariaDB won't catch MySQL-8-only issues (see FK rule above).
+- **Local PHP IS available** (winget `PHP.PHP.8.3`, 8.3.31) — usable for `php -l` lint + running lib code
+  against the MariaDB test DB. No `php.ini` is loaded, so enable extensions on the CLI:
+  `php -d extension_dir="<winget>\PHP.PHP.8.3_...\ext" -d extension=mbstring -d extension=pdo_mysql -d extension=openssl script.php`.
+  Pattern: drop a temp `portal/config/config.php` pointing at `mp_alert_test` on :3307, run, then DELETE it
+  (never leave a config.php behind — and never point tests at the live DB).
 
 ## Deploy gotchas (all bit us once)
 - **cPanel File Manager does NOT overwrite on re-upload → delete-then-upload** (portal files and MSIs alike).
@@ -74,8 +86,14 @@ Tagline: *"Every endpoint, every mile."* Live in production. **This GitHub repo 
 - Commit/push only when asked. End commit messages with a `Co-Authored-By: Claude …` line.
 
 ## Status & roadmap
-- **Phase 1** (real-time foundation) and **Phase 2** (monitoring: telemetry backbone + wider metrics) are DONE and LIVE.
-- Roadmap doc: `8 West IT/Milepost-Product-Roadmap.docx` (9 phases). **Next up = Phase 2 "smart alerting"**:
-  policy-based thresholds inherited down Client→Site→Group→Device (on the existing `policies`/`policy_assignments`
-  engine), an alert/event lifecycle (open→ack→resolve for MTTA), maintenance windows, multi-channel delivery.
+- **Phase 1** (real-time foundation) and **Phase 2 monitoring** (telemetry backbone + wider metrics) are DONE and LIVE.
+- **Phase 2 "smart alerting" — Step 3 CORE: BUILT + adversarially reviewed + locally tested, NOT yet deployed**
+  (2026-07-01). Portal-only (no agent/RT-backend change). Threshold engine on the policy inheritance engine +
+  alert lifecycle (open→ack→resolve) + email/in-app delivery + Alerts UI. Migration
+  `db/migrations/2026-07-01_phase2_alerting.sql`. **Deferred to fast-follow: maintenance windows + webhook
+  (Slack/Discord/Telegram) delivery.** DEPLOY = import migration → delete-then-upload portal files → set
+  `config.php` `alerts{enabled,email_to,smtp}` (needs cPanel 2FA) → add 1-min cron for `cron/alerts_dispatch.php`
+  → flip `alerts.enabled`.
+- Roadmap doc: `8 West IT/Milepost-Product-Roadmap.docx` (9 phases). After Step 3: **Phase 3 = patch management**
+  (ring rollout + rollback).
 - Deep project history, deploy specifics, and lessons live in the Claude memory files (`8west-rmm-project.md`).
