@@ -154,5 +154,28 @@ Tagline: *"Every endpoint, every mile."* Live in production. **This GitHub repo 
   is now feature-complete. Next Phase-3 increment (recommended): third-party app patching via winget** (reuses the same
   job/install/ring machinery). Lower-priority Phase-3 fast-follows: per-client/site compliance report; software
   inventory + license tracking.
+- **Phase 3 — third-party app patching via winget (scan/report + manual install): BUILT + tested, NOT yet deployed
+  (2026-07-02).** **Agent 1.5.0** adds `WingetManager.cs`: resolves winget.exe from the per-machine WindowsApps
+  `Microsoft.DesktopAppInstaller_*` folder (NOT on SYSTEM's PATH; the user PATH entry is a 0-byte alias that fails under
+  LocalSystem), `Scan()` runs `winget upgrade --include-unknown --accept-source-agreements --disable-interactivity` and
+  parses the fixed-width table by header column positions (stops at the "N upgrades available." summary so the
+  "require explicit targeting" second table is excluded), `Install(idsCsv)` runs `winget upgrade --id <id> --exact
+  --silent --accept-*` per Id on a BACKGROUND thread + re-scans. `Worker.DrainJobs` handles `winget_scan`
+  (inline)/`winget_install` (background) + a `winget` heartbeat directive drives self-scans on a timer (mirrors the
+  `patch` directive). **winget runs in MACHINE context (LocalSystem) → user-scoped installs may not appear** (honest
+  limitation, surfaced in the UI copy). **English-locale table headers assumed.** Portal: migration
+  `2026-07-02_phase3_winget.sql` (`agent_app_updates` table + appends `winget_scan`,`winget_install` to `jobs.job_type`);
+  `lib/winget.php` (`winget_enabled`/`winget_scan_interval_hours`/`winget_id_sanitize`/`winget_upsert_status`/`winget_status`);
+  `api/winget_report.php` (agent-bearer ingest, mirrors patch_report.php); `heartbeat.php` advertises the `winget`
+  directive when enabled; `config.php` `winget{enabled:false,scan_interval_hours:12}` kill-switch; a **Third-party apps
+  card on `agent.php`** (upgradable list + admin-only "Upgrade selected" + "Scan now"). Version bumped 1.4.0→1.5.0
+  (csproj + Product.wxs + Worker fallback literal). VERIFIED: agent `dotnet build` 0/0; the fixed-width parser validated
+  4/4 against a realistic `winget upgrade` sample (columns sliced, second table excluded, empty/no-header → []); migration
+  chain clean; 6 endpoint/helper assertions (id-sanitize, upsert/status round-trip, tech winget_scan login-only, admin
+  winget_install drops junk Ids, tech winget_install 403-blocked). 1.5.0 templates rebuilt; portal zip
+  `Downloads/milepost-phase3-winget-portal.zip`. DEPLOY = import `2026-07-02_phase3_winget.sql` → upload portal files
+  (lib/winget.php, api/winget_report.php, api/heartbeat.php, agent.php) → ship 1.5.0 templates → set `config.php`
+  `winget.enabled=true`. **Scan-and-report + manual install only (no ring automation for winget yet)** — a future
+  increment can fold winget into the ring rollout like WU.
 - Roadmap doc: `8 West IT/Milepost-Product-Roadmap.docx` (9 phases). Phase 3 = patch management (ring rollout + rollback).
 - Deep project history, deploy specifics, and lessons live in the Claude memory files (`8west-rmm-project.md`).

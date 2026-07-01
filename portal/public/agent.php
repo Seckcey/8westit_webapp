@@ -4,6 +4,7 @@ require_once __DIR__ . '/../lib/render.php';
 require_once __DIR__ . '/../lib/realtime.php';
 require_once __DIR__ . '/../lib/update.php';
 require_once __DIR__ . '/../lib/patch.php';
+require_once __DIR__ . '/../lib/winget.php';
 enforce_https();
 $user = require_login();
 
@@ -133,6 +134,27 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
                     ->execute([$id, $user['id'], implode(',', $kbs)]);
                 audit((int)$user['id'], $id, 'patch_rollback', count($kbs) . ' KBs: ' . implode(',', $kbs));
                 $flash = count($kbs) . ' update(s) queued to roll back — best-effort (some may not be reversible). Use "Scan now" afterward to refresh.';
+            }
+        }
+    } elseif ($action === 'winget_scan') {
+        // On-demand winget upgrade scan (read-only; login-only). Queued job the agent runs at check-in.
+        db()->prepare('INSERT INTO jobs (agent_id, created_by, job_type, payload) VALUES (?,?,\'winget_scan\',\'\')')
+            ->execute([$id, $user['id']]);
+        audit((int)$user['id'], $id, 'winget_scan', '');
+        $flash = 'winget scan queued — results appear within a minute.';
+    } elseif ($action === 'winget_install') {
+        // Upgrade selected third-party apps (DESTRUCTIVE → admin-only; the human click is the approval).
+        if (($user['role'] ?? '') !== 'admin') {
+            $flash = 'Only admins can upgrade apps.';
+        } else {
+            $ids = winget_id_sanitize($_POST['appid'] ?? []);
+            if (!$ids) {
+                $flash = 'No apps selected.';
+            } else {
+                db()->prepare('INSERT INTO jobs (agent_id, created_by, job_type, payload) VALUES (?,?,\'winget_install\',?)')
+                    ->execute([$id, $user['id'], implode(',', $ids)]);
+                audit((int)$user['id'], $id, 'winget_install', count($ids) . ' apps: ' . implode(',', $ids));
+                $flash = count($ids) . ' app upgrade(s) queued — this runs in the background. Use "Scan now" afterward to refresh.';
             }
         }
     } elseif ($action === 'archive') {
@@ -390,6 +412,61 @@ $pList    = $patch ? (json_decode((string)$patch['pending_json'], true) ?: []) :
           </div>
         </form>
       </details>
+    <?php endif; ?>
+  <?php endif; ?>
+</section>
+
+<?php
+$wg     = winget_status($id);   // Phase 3: latest winget upgrade scan (null if none / feature off)
+$wgList = $wg ? (json_decode((string)$wg['apps_json'], true) ?: []) : [];
+?>
+<section class="card">
+  <div class="card-head">
+    <h3>Third-party apps<?php if ($wg): ?> <small class="muted">scanned <?= e(time_ago($wg['last_scan_at'])) ?></small><?php endif; ?></h3>
+    <?php if (winget_enabled()): ?>
+      <form method="post" style="margin:0">
+        <input type="hidden" name="csrf" value="<?= e($csrf) ?>">
+        <input type="hidden" name="action" value="winget_scan">
+        <button class="btn-sm btn-ghost">Scan now</button>
+      </form>
+    <?php endif; ?>
+  </div>
+  <?php if (!winget_enabled()): ?>
+    <p class="muted">Third-party app patching (winget) is off. Enable it in <code>config.php</code> (<code>winget.enabled</code>) to collect app-upgrade status.</p>
+  <?php elseif (!$wg): ?>
+    <p class="muted">No winget scan reported yet — a winget-capable agent (v1.5.0+) reports within a minute of check-in.</p>
+  <?php else: ?>
+    <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center">
+      <span class="pill"><b><?= count($wgList) === 0 ? 'All apps up to date' : count($wgList) . ' upgrade' . (count($wgList) === 1 ? '' : 's') . ' available' ?></b></span>
+    </div>
+    <?php if ($wgList): ?>
+      <form method="post">
+        <input type="hidden" name="csrf" value="<?= e($csrf) ?>">
+        <input type="hidden" name="action" value="winget_install">
+        <table class="grid mini" style="margin-top:14px">
+          <thead><tr><th style="width:34px"></th><th>App</th><th>Id</th><th>Installed</th><th>Available</th><th>Source</th></tr></thead>
+          <tbody>
+          <?php foreach (array_slice($wgList, 0, 200) as $a): $aid = (string)($a['id'] ?? ''); ?>
+            <tr>
+              <td><?php if (preg_match('/^[A-Za-z0-9][A-Za-z0-9.\-+_]{0,127}$/', $aid)): ?><input type="checkbox" name="appid[]" value="<?= e($aid) ?>"><?php endif; ?></td>
+              <td><?= e((string)($a['name'] ?? '')) ?></td>
+              <td class="muted small"><?= e($aid) ?></td>
+              <td class="muted small"><?= e((string)($a['version'] ?? '')) ?></td>
+              <td class="muted small"><?= e((string)($a['available'] ?? '')) ?></td>
+              <td class="muted small"><?= e((string)($a['source'] ?? '')) ?></td>
+            </tr>
+          <?php endforeach; ?>
+          </tbody>
+        </table>
+        <?php if (($user['role'] ?? '') === 'admin'): ?>
+          <div class="rule-editor-actions">
+            <button class="btn-sm btn-primary" onclick="return confirm('Upgrade the selected apps on this device now? Runs in the background via winget.');">Upgrade selected</button>
+            <span class="muted small">winget runs in machine context (LocalSystem); user-scoped installs may not appear.</span>
+          </div>
+        <?php else: ?>
+          <p class="muted small" style="margin-top:10px">Only admins can upgrade apps.</p>
+        <?php endif; ?>
+      </form>
     <?php endif; ?>
   <?php endif; ?>
 </section>

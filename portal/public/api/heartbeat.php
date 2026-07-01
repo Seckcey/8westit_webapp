@@ -11,6 +11,7 @@ require_once __DIR__ . '/../../lib/auth.php';
 require_once __DIR__ . '/../../lib/realtime.php';
 require_once __DIR__ . '/../../lib/update.php';
 require_once __DIR__ . '/../../lib/patch.php';
+require_once __DIR__ . '/../../lib/winget.php';
 enforce_https();
 
 if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') json_err('POST required', 405);
@@ -59,6 +60,12 @@ if ($upd !== null) $resp['update'] = $upd;
 // Windows Update scans on its own timer; absent = don't scan. Old agents ignore this unknown key.
 if (patch_enabled()) {
     $resp['patch'] = ['enabled' => true, 'interval_hours' => patch_scan_interval_hours()];
+}
+
+// Third-party app patching directive (Phase 3, winget; off by default). Present => the agent runs
+// `winget upgrade` scans on its own timer. Absent = don't scan. Old agents ignore the unknown key.
+if (winget_enabled()) {
+    $resp['winget'] = ['enabled' => true, 'interval_hours' => winget_scan_interval_hours()];
 }
 
 json_out($resp);

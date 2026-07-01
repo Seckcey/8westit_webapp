@@ -144,4 +144,14 @@ return [
         'enabled'             => false,  // master gate
         'scan_interval_hours' => 8,      // how often a supporting agent runs a Windows Update scan
     ],
+
+    // --- Third-party app patching (Phase 3, winget) ---
+    // HARD KILL-SWITCH — DEFAULT OFF. While false, supporting agents do NOT run `winget upgrade` and
+    // the device page shows no third-party app data. Flip on and a 1.5.0+ agent reports available
+    // application upgrades; admins can then queue winget_install jobs from the device page. NOTE:
+    // winget runs in MACHINE context (the agent is LocalSystem) — user-scoped installs may not appear.
+    'winget' => [
+        'enabled'             => false,  // master gate
+        'scan_interval_hours' => 12,     // how often a supporting agent runs `winget upgrade`
+    ],
 ];

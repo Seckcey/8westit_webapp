@@ -32,7 +32,7 @@ namespace EightWest.Agent
                     return v.Major + "." + v.Minor + "." + (v.Build < 0 ? 0 : v.Build);
             }
             catch { /* fall through to the literal */ }
-            return "1.4.0";
+            return "1.5.0";
         }
 
         private readonly ManualResetEvent _stop = new ManualResetEvent(false);
@@ -51,6 +51,11 @@ namespace EightWest.Agent
         private DateTime _lastPatchScan = DateTime.MinValue;
         private bool _patchEnabled = false;
         private int _patchIntervalHours = 8;
+
+        // --- Third-party app patching (Phase 3, winget) --- advertised by the "winget" directive.
+        private DateTime _lastWingetScan = DateTime.MinValue;
+        private bool _wingetEnabled = false;
+        private int _wingetIntervalHours = 12;
         private bool _rustConfigured = false;
         private DateTime _lastRustAttempt = DateTime.MinValue;
 
@@ -86,6 +91,7 @@ namespace EightWest.Agent
                 _cfg = Config.Load();
                 _state = AgentState.Load();
                 PatchManager.Init(_cfg.PortalUrl, () => _state.AuthToken);   // patch jobs self-report
+                WingetManager.Init(_cfg.PortalUrl, () => _state.AuthToken);  // winget jobs self-report
                 Log.Info($"Agent {Version} starting. Portal={_cfg.PortalUrl}");
 
                 // Startup self-heal: if a prior update swapped the on-disk binary but the
@@ -335,6 +341,10 @@ namespace EightWest.Agent
                     if (_patchEnabled && (DateTime.UtcNow - _lastPatchScan).TotalHours >= _patchIntervalHours)
                         SendPatchScan();
 
+                    // Third-party app scan (Phase 3, winget): same cadence model as the WU scan.
+                    if (_wingetEnabled && (DateTime.UtcNow - _lastWingetScan).TotalHours >= _wingetIntervalHours)
+                        SendWingetScan();
+
                     // Install + configure RustDesk in the background, retrying every 10 min
                     // until it's ready (first run downloads + silently installs it).
                     if (!_rustConfigured && (DateTime.UtcNow - _lastRustAttempt).TotalMinutes >= 10)
@@ -385,6 +395,12 @@ namespace EightWest.Agent
             var patch = resp.ContainsKey("patch") ? resp["patch"] as Dictionary<string, object> : null;
             _patchEnabled = patch != null && patch.ContainsKey("enabled") && Convert.ToBoolean(patch["enabled"]);
             if (patch != null) _patchIntervalHours = Math.Max(1, (int)Num(patch, "interval_hours", 8));
+
+            // A "winget" directive present => third-party app patching is enabled; the agent runs
+            // winget scans on its own timer. Absent (feature off / old portal) => no scans.
+            var winget = resp.ContainsKey("winget") ? resp["winget"] as Dictionary<string, object> : null;
+            _wingetEnabled = winget != null && winget.ContainsKey("enabled") && Convert.ToBoolean(winget["enabled"]);
+            if (winget != null) _wingetIntervalHours = Math.Max(1, (int)Num(winget, "interval_hours", 12));
 
             return (int)Num(resp, "pending_jobs", 0);
         }
@@ -470,6 +486,44 @@ namespace EightWest.Agent
                     continue;
                 }
 
+                // Third-party app jobs (winget), same shape as patch: install on a BACKGROUND thread
+                // (a long winget upgrade never stalls the heartbeat), scan inline.
+                if (type == "winget_scan" || type == "winget_install")
+                {
+                    if (id != 0) _state.MarkJobSeen(id);
+                    if (type == "winget_install")
+                    {
+                        int jobId = id; string ids = payload;
+                        new Thread(() =>
+                        {
+                            JobResult wr;
+                            JobRunner.ExecGate.Wait();
+                            try { wr = new JobResult { Success = true, ExitCode = 0, Output = WingetManager.Install(ids) }; }
+                            catch (Exception ex) { wr = new JobResult { Success = false, ExitCode = -1, Output = "winget install error: " + ex.Message }; }
+                            finally { JobRunner.ExecGate.Release(); }
+                            try
+                            {
+                                new ApiClient(_cfg.PortalUrl, _state.AuthToken).Post("/api/jobs.php", new Dictionary<string, object>
+                                { ["job_id"] = jobId, ["status"] = wr.Success ? "done" : "error", ["exit_code"] = wr.ExitCode, ["output"] = wr.Output });
+                            }
+                            catch (Exception ex) { Log.Warn("winget_install result report failed: " + ex.Message); }
+                        })
+                        { IsBackground = true, Name = "WingetInstall" }.Start();
+                        Log.Info($"winget_install job {id} started (background thread).");
+                    }
+                    else // winget_scan — run inline
+                    {
+                        JobResult wr;
+                        JobRunner.ExecGate.Wait();
+                        try { wr = new JobResult { Success = true, ExitCode = 0, Output = WingetManager.ScanAndReport() }; }
+                        catch (Exception ex) { wr = new JobResult { Success = false, ExitCode = -1, Output = "winget scan error: " + ex.Message }; }
+                        finally { JobRunner.ExecGate.Release(); }
+                        _api.Post("/api/jobs.php", new Dictionary<string, object>
+                        { ["job_id"] = id, ["status"] = wr.Success ? "done" : "error", ["exit_code"] = wr.ExitCode, ["output"] = wr.Output });
+                    }
+                    continue;
+                }
+
                 Log.Info($"Running job {id} ({type})");
 
                 // Single-flight across BOTH paths (shared with RealtimeClient): a poll job
@@ -510,6 +564,17 @@ namespace EightWest.Agent
                 Log.Info("Patch scan reported.");
             }
             catch (Exception ex) { Log.Warn("Patch scan/report failed: " + ex.Message); }
+        }
+
+        private void SendWingetScan()
+        {
+            try
+            {
+                WingetManager.ScanAndReport();
+                _lastWingetScan = DateTime.UtcNow;
+                Log.Info("winget scan reported.");
+            }
+            catch (Exception ex) { Log.Warn("winget scan/report failed: " + ex.Message); }
         }
 
         /// <summary>
