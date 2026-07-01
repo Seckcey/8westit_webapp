@@ -4,6 +4,7 @@ using System.Linq;
 using System.Management;
 using System.Net;
 using System.Net.Sockets;
+using System.Reflection;
 using System.Threading;
 
 namespace EightWest.Agent
@@ -14,7 +15,25 @@ namespace EightWest.Agent
     /// </summary>
     public class Worker
     {
-        public const string Version = "1.1.7";
+        // Reported to the portal (enroll/heartbeat) and used by the Updater/SelfHeal as the
+        // RUNNING process version. Derived from the executing assembly (set by the csproj
+        // <Version>) rather than a hand-maintained literal: a stale literal kept reporting an
+        // old version after a successful upgrade, so the portal re-advertised the same update
+        // forever. The literal below is only a fallback if assembly metadata is unavailable —
+        // keep it in sync with the csproj <Version> when bumping.
+        public static readonly string Version = ResolveRunningVersion();
+
+        private static string ResolveRunningVersion()
+        {
+            try
+            {
+                var v = Assembly.GetExecutingAssembly().GetName().Version;
+                if (v != null)
+                    return v.Major + "." + v.Minor + "." + (v.Build < 0 ? 0 : v.Build);
+            }
+            catch { /* fall through to the literal */ }
+            return "1.1.9";
+        }
 
         private readonly ManualResetEvent _stop = new ManualResetEvent(false);
         private Thread _thread;
@@ -26,6 +45,7 @@ namespace EightWest.Agent
 
         private int _heartbeatSecs = 60;
         private DateTime _lastInventory = DateTime.MinValue;
+        private DateTime _lastSelfHealCheck = DateTime.MinValue;
         private bool _rustConfigured = false;
         private DateTime _lastRustAttempt = DateTime.MinValue;
 
@@ -61,6 +81,12 @@ namespace EightWest.Agent
                 _cfg = Config.Load();
                 _state = AgentState.Load();
                 Log.Info($"Agent {Version} starting. Portal={_cfg.PortalUrl}");
+
+                // Startup self-heal: if a prior update swapped the on-disk binary but the
+                // service was never cycled (the SCM restart missed), the running image can be
+                // OLDER than the file on disk. Detect that and self-restart once so SCM loads
+                // the new binary. Cheap, best-effort, and clears its marker on the healthy path.
+                SelfHeal.CheckStaleBinary(_state);
 
                 if (string.IsNullOrEmpty(_cfg.PortalUrl))
                 {
@@ -283,6 +309,16 @@ namespace EightWest.Agent
                     {
                         Updater.MaybeUpdate(_pendingUpdate, _cfg, _state);
                         _pendingUpdate = null;
+                    }
+
+                    // Self-heal (periodic): an update may have landed on disk WITHOUT cycling
+                    // this live process (the SCM restart missed). Catch the stale running image
+                    // while the process is still up and self-restart once. Idempotent + loop-safe
+                    // via a persisted marker; holds off while an update is still settling.
+                    if ((DateTime.UtcNow - _lastSelfHealCheck).TotalMinutes >= 5)
+                    {
+                        _lastSelfHealCheck = DateTime.UtcNow;
+                        SelfHeal.CheckStaleBinary(_state);
                     }
 
                     if ((DateTime.UtcNow - _lastInventory).TotalHours >= 6) SendInventory();

@@ -59,6 +59,17 @@ namespace EightWest.Agent
         public string LastVerifyFailAtUtc { get; set; } = "";
         public int VerifyFailCount { get; set; } = 0;
 
+        /// <summary>
+        /// Self-heal (stale-binary) marker. When an update lands on disk but the live service
+        /// process is never cycled (the SCM restart missed), the running image is OLDER than
+        /// the on-disk exe. <see cref="SelfHeal"/> restarts the service to load the new binary —
+        /// but AT MOST ONCE per detected on-disk version, guarded by this marker, so a restart
+        /// that fails to fix the mismatch can never become a restart loop. Cleared once the
+        /// running version has caught up to the on-disk version again.
+        /// </summary>
+        public string SelfHealRestartVersion { get; set; } = "";
+        public string SelfHealRestartAtUtc { get; set; } = "";
+
         /// <summary>job_ids already executed (idempotency LRU). Oldest first.</summary>
         public List<int> SeenJobIds { get; set; } = new List<int>();
 
@@ -87,6 +98,10 @@ namespace EightWest.Agent
                             ?? new AgentState();
                     if (s.SeenJobIds == null) s.SeenJobIds = new List<int>();
                     if (s.ResultOutbox == null) s.ResultOutbox = new List<PendingResult>();
+                    // Self-heal marker strings are read via .Length; guard against an explicit
+                    // null in a hand-edited/older state.json.
+                    if (s.SelfHealRestartVersion == null) s.SelfHealRestartVersion = "";
+                    if (s.SelfHealRestartAtUtc == null) s.SelfHealRestartAtUtc = "";
                     return s;
                 }
             }
@@ -249,6 +264,65 @@ namespace EightWest.Agent
                 var window = TimeSpan.FromTicks(ticks);
                 return (DateTime.UtcNow - t) < window;
             }
+        }
+
+        /* ---------- self-heal (stale-binary restart) bookkeeping (thread-safe) ---------- */
+
+        /// <summary>
+        /// True when a self-update was LAUNCHED within <paramref name="grace"/>. Used to hold
+        /// off self-heal so the update path's own MSI + service restart can settle before we
+        /// conclude the process is genuinely stuck (avoids racing an in-flight upgrade).
+        /// </summary>
+        public bool RecentUpdateAttempt(TimeSpan grace)
+        {
+            lock (_updateLock)
+            {
+                if (!DateTime.TryParse(LastUpdateAttemptAtUtc, null,
+                        System.Globalization.DateTimeStyles.RoundtripKind, out var t))
+                    return false;
+                return (DateTime.UtcNow - t) < grace;
+            }
+        }
+
+        /// <summary>
+        /// Record that a one-shot self-heal restart was requested for <paramref name="onDiskVersion"/>,
+        /// so we never request it again for that same on-disk version (loop-safe). Persists.
+        /// </summary>
+        public void RecordSelfHealRestart(string onDiskVersion)
+        {
+            lock (_updateLock)
+            {
+                SelfHealRestartVersion = onDiskVersion ?? "";
+                SelfHealRestartAtUtc = DateTime.UtcNow.ToString("o");
+            }
+            SafeSave();
+        }
+
+        /// <summary>
+        /// True when a self-heal restart was already requested for this exact on-disk version,
+        /// so the caller must not request another (bounds a restart loop).
+        /// </summary>
+        public bool AlreadySelfHealedFor(string onDiskVersion)
+        {
+            lock (_updateLock)
+                return SelfHealRestartVersion.Length > 0 &&
+                       string.Equals(SelfHealRestartVersion, onDiskVersion, StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>
+        /// Clear the self-heal marker (the running version has caught up to the on-disk binary),
+        /// so a FUTURE update that lands the same way gets a fresh single self-restart. Persists
+        /// only when something actually changed.
+        /// </summary>
+        public void ClearSelfHealMarker()
+        {
+            lock (_updateLock)
+            {
+                if (SelfHealRestartVersion.Length == 0 && SelfHealRestartAtUtc.Length == 0) return;
+                SelfHealRestartVersion = "";
+                SelfHealRestartAtUtc = "";
+            }
+            SafeSave();
         }
 
         private void SafeSave()
