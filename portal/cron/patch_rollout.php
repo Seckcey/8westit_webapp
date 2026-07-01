@@ -114,33 +114,51 @@ function patch_target_step(PDO $pdo, array $ro, array $t, int $nowTs): void
         // Only kick off when the device is ONLINE and inside the install window, so the queued job
         // runs (near-)immediately within the window rather than whenever the agent next polls.
         if (!rollout_online($pdo, $aid, $nowTs) || !rollout_in_window($pdo, $ro, $aid, $nowTs)) return;
-        $kbs = patch_auto_approve_kbs($aid);
-        if (!$kbs) {   // nothing auto-approvable pending → this device is already compliant
+        $kbs  = array_slice(patch_auto_approve_kbs($aid), 0, 100);   // WU track
+        $apps = array_slice(winget_auto_upgrade_ids($aid), 0, 100);  // winget track (opt-in per policy)
+        if (!$kbs && !$apps) {   // nothing auto-approvable pending → this device is already compliant
             $pdo->prepare("UPDATE patch_rollout_targets SET state='verified' WHERE id=?")->execute([$tid]);
             return;
         }
-        $payload = implode(',', array_slice($kbs, 0, 100));
-        $pdo->prepare("INSERT INTO jobs (agent_id, created_by, job_type, payload) VALUES (?,NULL,'patch_install',?)")->execute([$aid, $payload]);
-        $jobId = (int)$pdo->lastInsertId();
-        $pdo->prepare("UPDATE patch_rollout_targets SET state='installing', install_job_id=?, kb_list=?, attempts=attempts+1 WHERE id=?")
-            ->execute([$jobId, $payload, $tid]);
+        $kbPayload  = implode(',', $kbs);
+        $appPayload = implode(',', $apps);
+        $installJob = null; $wingetJob = null;
+        if ($kbs) {
+            $pdo->prepare("INSERT INTO jobs (agent_id, created_by, job_type, payload) VALUES (?,NULL,'patch_install',?)")->execute([$aid, $kbPayload]);
+            $installJob = (int)$pdo->lastInsertId();
+        }
+        if ($apps) {
+            $pdo->prepare("INSERT INTO jobs (agent_id, created_by, job_type, payload) VALUES (?,NULL,'winget_install',?)")->execute([$aid, $appPayload]);
+            $wingetJob = (int)$pdo->lastInsertId();
+        }
+        $pdo->prepare("UPDATE patch_rollout_targets SET state='installing', install_job_id=?, winget_job_id=?, kb_list=?, app_list=?, attempts=attempts+1 WHERE id=?")
+            ->execute([$installJob, $wingetJob, $kbPayload, $appPayload, $tid]);
         return;
     }
 
     if ($state === 'installing') {
-        $js = $pdo->prepare('SELECT status, output FROM jobs WHERE id=?');
-        $js->execute([(int)$t['install_job_id']]);
-        $job = $js->fetch();
-        if (!$job) { $pdo->prepare("UPDATE patch_rollout_targets SET state='failed', last_error='install job missing' WHERE id=?")->execute([$tid]); return; }
-        if ($job['status'] === 'error') { $pdo->prepare("UPDATE patch_rollout_targets SET state='failed', last_error=? WHERE id=?")->execute([mb_substr((string)$job['output'], 0, 255), $tid]); return; }
-        if ($job['status'] === 'done')  { $pdo->prepare("UPDATE patch_rollout_targets SET state='installed' WHERE id=?")->execute([$tid]); }
+        // Wait for BOTH tracks (whichever exist). Any error => failed; all present jobs done => installed.
+        $err = null; $allDone = true;
+        foreach (['install_job_id' => 'WU install', 'winget_job_id' => 'winget upgrade'] as $col => $label) {
+            $jid = (int)$t[$col];
+            if ($jid === 0) continue;
+            $js = $pdo->prepare('SELECT status, output FROM jobs WHERE id=?'); $js->execute([$jid]);
+            $job = $js->fetch();
+            if (!$job) { $err = "$label job missing"; break; }
+            if ($job['status'] === 'error') { $err = mb_substr($label . ': ' . (string)$job['output'], 0, 255); break; }
+            if ($job['status'] !== 'done') $allDone = false;
+        }
+        if ($err !== null) { $pdo->prepare("UPDATE patch_rollout_targets SET state='failed', last_error=? WHERE id=?")->execute([$err, $tid]); return; }
+        if ($allDone) $pdo->prepare("UPDATE patch_rollout_targets SET state='installed' WHERE id=?")->execute([$tid]);
         return;   // queued/running → wait
     }
 
     if ($state === 'installed') {
-        // The agent self-rescans after installing (2a). If the auto-approve updates are still pending,
-        // the install did not take → fail. Otherwise reboot (per policy) or verify.
-        if (patch_auto_approve_kbs($aid)) {
+        // The agent self-rescans after installing. If the SPECIFIC things we pushed are still pending
+        // (WU KBs or winget apps), the install did not take → fail. Otherwise reboot (WU, per policy) or verify.
+        $kbStill  = array_intersect(patch_kb_sanitize((string)$t['kb_list']), patch_auto_approve_kbs($aid));
+        $appStill = array_intersect(winget_id_sanitize((string)$t['app_list']), winget_auto_upgrade_ids($aid));
+        if ($kbStill || $appStill) {
             $pdo->prepare("UPDATE patch_rollout_targets SET state='failed', last_error='updates still pending after install' WHERE id=?")->execute([$tid]);
             return;
         }

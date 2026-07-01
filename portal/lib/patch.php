@@ -9,6 +9,7 @@
 declare(strict_types=1);
 require_once __DIR__ . '/bootstrap.php';
 require_once __DIR__ . '/policy.php';   // effective_policy_for_agent() for patch_settings (2b)
+require_once __DIR__ . '/winget.php';   // winget_status() for the rollout's winget track (one-way dep)
 
 function patch_enabled(): bool
 {
@@ -96,6 +97,63 @@ function patch_fleet(): array
     } catch (Throwable $e) { return []; }
 }
 
+/**
+ * Patch-compliance rollup grouped by client → site, from agent_patch_status (WU) + agent_app_updates
+ * (winget). One aggregate query grouped by (client, site), folded into client rows with nested sites.
+ * Read-only; tolerant of a pre-migration DB. A device is "compliant" when it has reported and has 0
+ * pending WU updates.
+ */
+function patch_compliance_report(): array
+{
+    try {
+        $rows = db()->query(
+            "SELECT a.client_id,
+                    COALESCE(c.name, '(unassigned)') AS client_name,
+                    CASE WHEN a.site = '' THEN '(no site)' ELSE a.site END AS site,
+                    COUNT(*)                                         AS devices,
+                    SUM(aps.agent_id IS NOT NULL)                    AS reporting,
+                    AVG(aps.compliance_pct)                          AS avg_compliance,
+                    SUM(COALESCE(aps.pending_count, 0))              AS pending,
+                    SUM(COALESCE(aps.critical_count, 0))             AS critical,
+                    SUM(COALESCE(aps.reboot_pending, 0))             AS reboots,
+                    SUM(COALESCE(aau.update_count, 0))               AS app_updates,
+                    SUM(CASE WHEN aps.agent_id IS NOT NULL AND COALESCE(aps.pending_count, 0) = 0 THEN 1 ELSE 0 END) AS compliant
+               FROM agents a
+               LEFT JOIN clients c            ON c.id = a.client_id
+               LEFT JOIN agent_patch_status aps ON aps.agent_id = a.id
+               LEFT JOIN agent_app_updates aau  ON aau.agent_id = a.id
+              WHERE a.is_archived = 0
+              GROUP BY a.client_id, client_name, site
+              ORDER BY client_name, site"
+        )->fetchAll();
+    } catch (Throwable $e) { return []; }
+
+    $clients = [];
+    foreach ($rows as $r) {
+        $cid = (int)$r['client_id'];
+        if (!isset($clients[$cid])) {
+            $clients[$cid] = ['client_id' => $cid, 'name' => (string)$r['client_name'],
+                              'devices' => 0, 'reporting' => 0, 'pending' => 0, 'critical' => 0,
+                              'reboots' => 0, 'app_updates' => 0, 'compliant' => 0, '_wsum' => 0.0, '_wn' => 0, 'sites' => []];
+        }
+        $c =& $clients[$cid];
+        foreach (['devices','reporting','pending','critical','reboots','app_updates','compliant'] as $k) $c[$k] += (int)$r[$k];
+        if ($r['avg_compliance'] !== null) { $c['_wsum'] += (float)$r['avg_compliance'] * (int)$r['reporting']; $c['_wn'] += (int)$r['reporting']; }
+        $c['sites'][] = [
+            'site' => (string)$r['site'], 'devices' => (int)$r['devices'], 'reporting' => (int)$r['reporting'],
+            'avg_compliance' => $r['avg_compliance'] !== null ? round((float)$r['avg_compliance'], 1) : null,
+            'pending' => (int)$r['pending'], 'critical' => (int)$r['critical'], 'reboots' => (int)$r['reboots'],
+            'app_updates' => (int)$r['app_updates'], 'compliant' => (int)$r['compliant'],
+        ];
+        unset($c);
+    }
+    foreach ($clients as &$c) {
+        $c['avg_compliance'] = $c['_wn'] > 0 ? round($c['_wsum'] / $c['_wn'], 1) : null;
+        unset($c['_wsum'], $c['_wn']);
+    }
+    return array_values($clients);
+}
+
 /* ── Patch policy (patch_settings) — Phase 3 increment 2b ───────────────────────────────────────
    Rides the policy engine under a `patch_settings` doc key (inherited Client→Site→Group→Device,
    like `thresholds`). SERVER-ONLY: agent_policy.php strips it and policy.php excludes it from the
@@ -106,8 +164,11 @@ function patch_default_settings(): array
 {
     return [
         'ring'         => 'broad',                                 // canary|early|broad|exclude
-        'auto_approve' => ['SecurityUpdates', 'CriticalUpdates'],  // classifications that auto-install
+        'auto_approve' => ['SecurityUpdates', 'CriticalUpdates'],  // WU classifications that auto-install
         'reboot'       => ['policy' => 'if_required', 'grace_min' => 60, 'prompt_user' => true],
+        // Third-party app (winget) auto-upgrade in a rollout — opt-in, default OFF. include: 'all' or
+        // a list of package Ids; exclude: package Ids to never auto-upgrade.
+        'winget'       => ['auto_upgrade' => false, 'include' => 'all', 'exclude' => []],
     ];
 }
 
@@ -123,6 +184,7 @@ function patch_settings_for_agent(int $agentId): array
         if (isset($ps['ring']) && is_string($ps['ring']))            $s['ring']         = $ps['ring'];
         if (isset($ps['auto_approve']) && is_array($ps['auto_approve'])) $s['auto_approve'] = array_values($ps['auto_approve']);
         if (isset($ps['reboot']) && is_array($ps['reboot']))         $s['reboot']       = array_replace($s['reboot'], $ps['reboot']);
+        if (isset($ps['winget']) && is_array($ps['winget']))         $s['winget']       = array_replace($s['winget'], $ps['winget']);
     } catch (Throwable $e) { /* pre-migration / no policy tables */ }
     return $cache[$agentId] = $s;
 }
@@ -154,6 +216,33 @@ function patch_auto_approve_kbs(int $agentId): array
         if ($match && !in_array($kb, $kbs, true)) $kbs[] = $kb;
     }
     return $kbs;
+}
+
+/**
+ * winget package Ids from an agent's latest scan that a rollout should auto-upgrade, per its patch
+ * policy (patch_settings.winget). Returns [] when auto_upgrade is off. include='all' upgrades every
+ * scanned app except `exclude`; a list restricts to those Ids (minus `exclude`).
+ */
+function winget_auto_upgrade_ids(int $agentId): array
+{
+    $w = patch_settings_for_agent($agentId)['winget'] ?? [];
+    if (empty($w['auto_upgrade'])) return [];
+    $st = winget_status($agentId);
+    if (!$st) return [];
+    $apps = json_decode((string)($st['apps_json'] ?? '[]'), true);
+    if (!is_array($apps)) return [];
+    $include = $w['include'] ?? 'all';
+    $exclude = is_array($w['exclude'] ?? null) ? array_map('strval', $w['exclude']) : [];
+    $ids = [];
+    foreach ($apps as $a) {
+        if (!is_array($a)) continue;
+        $id = trim((string)($a['id'] ?? ''));
+        if ($id === '' || !preg_match('/^[A-Za-z0-9][A-Za-z0-9.\-+_]{0,127}$/', $id)) continue;
+        if (in_array($id, $exclude, true)) continue;
+        if (is_array($include) && !in_array($id, $include, true)) continue;   // list restricts; 'all' does not
+        if (!in_array($id, $ids, true)) $ids[] = $id;
+    }
+    return $ids;
 }
 
 /* ── Rollout reads (used by the UI + cron) ─────────────────────────────────────────────────────── */

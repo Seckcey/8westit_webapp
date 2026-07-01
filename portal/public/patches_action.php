@@ -117,6 +117,7 @@ if ($action === 'prule_save') {
         'ring'         => $ring,
         'auto_approve' => $auto,
         'reboot'       => ['policy' => $rpolicy, 'grace_min' => max(0, (int)($_POST['grace_min'] ?? 60)), 'prompt_user' => !empty($_POST['prompt_user'])],
+        'winget'       => ['auto_upgrade' => !empty($_POST['winget_auto_upgrade']), 'include' => 'all', 'exclude' => []],
     ];
     $name = mb_substr(trim((string)($_POST['name'] ?? '')), 0, 128);
     if ($name === '') $name = 'Patch policy — ' . ($scopeType === 'global' ? 'Global' : ucfirst($scopeType) . ' #' . $scopeId);

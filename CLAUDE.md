@@ -177,5 +177,27 @@ Tagline: *"Every endpoint, every mile."* Live in production. **This GitHub repo 
   (lib/winget.php, api/winget_report.php, api/heartbeat.php, agent.php) → ship 1.5.0 templates → set `config.php`
   `winget.enabled=true`. **Scan-and-report + manual install only (no ring automation for winget yet)** — a future
   increment can fold winget into the ring rollout like WU.
+- **Phase 3 — three portal-only fast-follows (winget-in-rollout + compliance report + software/licenses): BUILT +
+  tested, NOT yet deployed (2026-07-02). NO agent change** (all reuse the 1.5.0 agent + existing inventory).
+  **(A) winget folded into the ring rollout:** new server-only `patch_settings.winget` (`{auto_upgrade,include,exclude}`,
+  default OFF, opt-in per policy, stripped from the agent payload + etag like the rest of patch_settings). Migration
+  `2026-07-02_phase3_winget_rollout.sql` adds `patch_rollout_targets.app_list` + `winget_job_id`. `cron/patch_rollout.php`
+  `patch_target_step` now runs a PARALLEL winget track: `pending` creates BOTH a `patch_install` (WU KBs) AND a
+  `winget_install` (auto-upgrade app Ids from `winget_auto_upgrade_ids()`) job; `installing` waits for both; `installed`
+  fails only if the SPECIFIC installed KBs/apps are still pending (intersection), else reboots (WU) → `verified`. Policy UI
+  = a "Auto-upgrade third-party apps (winget)" toggle on the `patches.php` Patch-policy editor (persisted in
+  `patches_action.php` `prule_save`). **(B) Patch-compliance report:** `patch_compliance_report()` in `lib/patch.php` (one
+  aggregate query grouped by client→site over `agent_patch_status` + `agent_app_updates`, weighted avg compliance) rendered
+  as a read-only card on `patches.php`. **(C) Software inventory + license tracking:** `lib/software.php`
+  (`software_fleet_inventory()` aggregates installed apps across `inventory.data_json['software']` — already collected by
+  the agent — with search; `licenses_list()` auto-counts license "seats used" by substring-matching `match_name` against
+  fleet software) + new `software.php` page (Licenses card w/ admin CRUD + expiry flags; Software inventory card w/ search)
+  + a Software nav link. Migration `2026-07-02_phase3_software_licenses.sql` (`software_licenses` table, FK `fk_swlic_user`).
+  VERIFIED: migration chain clean; all files `php -l` clean; **A** engine 10 assertions (winget-ON drives both tracks
+  pending→installing→installed→verified; winget-OFF creates 0 winget jobs) + prule_save winget round-trip; **B** 4
+  aggregation asserts + 3 render asserts; **C** 5 aggregation asserts (fleet counts, versions, seats auto-count, search) +
+  render/admin-save + tech-blocked. DEPLOY (portal-only) = import the 3 migrations (`…_winget_rollout`,
+  `…_software_licenses`; the winget_rollout one ALTERs patch_rollout_targets) → upload changed portal files (cron/patch_rollout.php,
+  lib/patch.php, lib/render.php, lib/software.php, public/patches.php, public/patches_action.php, public/software.php).
 - Roadmap doc: `8 West IT/Milepost-Product-Roadmap.docx` (9 phases). Phase 3 = patch management (ring rollout + rollback).
 - Deep project history, deploy specifics, and lessons live in the Claude memory files (`8west-rmm-project.md`).

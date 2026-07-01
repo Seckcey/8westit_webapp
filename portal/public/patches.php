@@ -83,12 +83,59 @@ layout_header('Patches', $user);
       <label>Grace (min)<input type="number" id="pr-grace" value="60" step="1" style="width:80px"></label>
       <label class="chk"><input type="checkbox" id="pr-prompt" checked> Prompt user</label>
     </div>
+    <div class="rule-editor-row">
+      <label class="chk"><input type="checkbox" id="pr-winget"> Auto-upgrade third-party apps (winget) in rollouts</label>
+    </div>
     <div class="rule-editor-actions">
       <button type="submit" class="btn-sm btn-primary">Save policy</button>
       <button type="button" class="btn-sm btn-ghost" id="pr-cancel">Cancel</button>
       <span class="muted small" id="pr-msg"></span>
     </div>
   </form>
+  <?php endif; ?>
+</section>
+
+<?php $compliance = patch_compliance_report(); ?>
+<section class="card">
+  <div class="card-head"><h3>Patch compliance</h3></div>
+  <p class="muted small">Windows Update compliance by client and site. A device counts as compliant once it has reported and has no pending updates.
+     "App updates" is the winget third-party count.</p>
+  <?php if (!$compliance): ?>
+    <p class="muted small">No devices yet.</p>
+  <?php else: ?>
+    <table class="grid mini">
+      <thead><tr><th>Client / Site</th><th>Devices</th><th>Reporting</th><th>Compliant</th><th>Avg&nbsp;%</th><th>Pending</th><th>Critical</th><th>Reboots</th><th>App&nbsp;updates</th></tr></thead>
+      <tbody>
+      <?php
+      $pct = static function ($v): string { return $v === null ? '—' : rtrim(rtrim(number_format((float)$v, 1), '0'), '.') . '%'; };
+      foreach ($compliance as $c): ?>
+        <tr>
+          <td><b><?= e($c['name']) ?></b></td>
+          <td><?= (int)$c['devices'] ?></td>
+          <td><?= (int)$c['reporting'] ?></td>
+          <td><?= (int)$c['compliant'] ?></td>
+          <td><?= e($pct($c['avg_compliance'])) ?></td>
+          <td><?= (int)$c['pending'] ?></td>
+          <td><?php if ((int)$c['critical'] > 0): ?><span class="tag tag-sev-critical"><?= (int)$c['critical'] ?></span><?php else: ?>0<?php endif; ?></td>
+          <td><?= (int)$c['reboots'] ?></td>
+          <td><?= (int)$c['app_updates'] ?></td>
+        </tr>
+        <?php foreach ($c['sites'] as $s): if (count($c['sites']) <= 1 && $s['site'] === '(no site)') continue; ?>
+          <tr class="muted small">
+            <td style="padding-left:22px"><?= e($s['site']) ?></td>
+            <td><?= (int)$s['devices'] ?></td>
+            <td><?= (int)$s['reporting'] ?></td>
+            <td><?= (int)$s['compliant'] ?></td>
+            <td><?= e($pct($s['avg_compliance'])) ?></td>
+            <td><?= (int)$s['pending'] ?></td>
+            <td><?= (int)$s['critical'] ?></td>
+            <td><?= (int)$s['reboots'] ?></td>
+            <td><?= (int)$s['app_updates'] ?></td>
+          </tr>
+        <?php endforeach; ?>
+      <?php endforeach; ?>
+      </tbody>
+    </table>
   <?php endif; ?>
 </section>
 
@@ -149,7 +196,7 @@ layout_header('Patches', $user);
       tr.appendChild(el('td', null, r.name));
       tr.appendChild(el('td', 'muted', r.scope_label));
       tr.appendChild(el('td', null, ps.ring || 'broad'));
-      tr.appendChild(el('td', 'muted small', (ps.auto_approve || []).join(', ') || '—'));
+      tr.appendChild(el('td', 'muted small', ((ps.auto_approve || []).join(', ') || '—') + (ps.winget && ps.winget.auto_upgrade ? ' + apps' : '')));
       tr.appendChild(el('td', 'muted small', (ps.reboot && ps.reboot.policy) || 'if_required'));
       tr.appendChild(el('td', null, r.is_enabled ? 'yes' : 'no'));
       const act = el('td');
@@ -187,6 +234,7 @@ layout_header('Patches', $user);
     $('pr-reboot').value = (ps.reboot && ps.reboot.policy) || 'if_required';
     $('pr-grace').value = (ps.reboot && ps.reboot.grace_min != null) ? ps.reboot.grace_min : 60;
     $('pr-prompt').checked = ps.reboot ? !!ps.reboot.prompt_user : true;
+    $('pr-winget').checked = !!(ps.winget && ps.winget.auto_upgrade);
     fillTarget('pr-scope-type', 'pr-target-wrap', 'pr-scope-id');
     if (r && r.scope_id) $('pr-scope-id').value = r.scope_id;
     $('pr-editor').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -209,7 +257,7 @@ layout_header('Patches', $user);
     $('pr-scope-type').addEventListener('change', () => fillTarget('pr-scope-type', 'pr-target-wrap', 'pr-scope-id'));
     $('pr-editor').addEventListener('submit', async (e) => {
       e.preventDefault();
-      const p = { action: 'prule_save', policy_id: $('pr-policy-id').value || '', name: $('pr-name').value, scope_type: $('pr-scope-type').value, ring: $('pr-ring').value, reboot_policy: $('pr-reboot').value, grace_min: $('pr-grace').value, is_enabled: $('pr-enabled').checked ? 1 : 0, prompt_user: $('pr-prompt').checked ? 1 : 0 };
+      const p = { action: 'prule_save', policy_id: $('pr-policy-id').value || '', name: $('pr-name').value, scope_type: $('pr-scope-type').value, ring: $('pr-ring').value, reboot_policy: $('pr-reboot').value, grace_min: $('pr-grace').value, is_enabled: $('pr-enabled').checked ? 1 : 0, prompt_user: $('pr-prompt').checked ? 1 : 0, winget_auto_upgrade: $('pr-winget').checked ? 1 : 0 };
       if (p.scope_type !== 'global') p.scope_id = $('pr-scope-id').value || '';
       const auto = Array.from(document.querySelectorAll('.pr-auto')).filter(c => c.checked).map(c => c.value);
       const body = new URLSearchParams(p); auto.forEach(a => body.append('auto_approve[]', a)); body.append('csrf', CSRF);
