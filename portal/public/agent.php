@@ -3,6 +3,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../lib/render.php';
 require_once __DIR__ . '/../lib/realtime.php';
 require_once __DIR__ . '/../lib/update.php';
+require_once __DIR__ . '/../lib/patch.php';
 enforce_https();
 $user = require_login();
 
@@ -107,6 +108,8 @@ $inv = db()->prepare('SELECT data_json, updated_at FROM inventory WHERE agent_id
 $inv->execute([$id]);
 $invRow = $inv->fetch();
 $inventory = $invRow ? json_decode($invRow['data_json'], true) : null;
+
+$patch = patch_status($id);   // Phase 3: latest Windows Update scan (null if none / feature off)
 
 $jobs = db()->prepare('SELECT * FROM jobs WHERE agent_id=? ORDER BY id DESC LIMIT 20');
 $jobs->execute([$id]);
@@ -260,6 +263,44 @@ layout_header($agent['display_name'] ?: $agent['hostname'], $user);
   <div class="mp-chart" data-chart-canvas></div>
   <div class="mp-extras" data-chart-extras hidden></div>
   <p class="muted small mp-chart-empty" data-chart-empty hidden>No performance history yet — samples accrue about once a minute while the agent is online.</p>
+</section>
+
+<?php
+$pPending = $patch ? (int)$patch['pending_count']  : 0;
+$pCrit    = $patch ? (int)$patch['critical_count'] : 0;
+$pReboot  = $patch && (int)$patch['reboot_pending'] === 1;
+$pComp    = ($patch && $patch['compliance_pct'] !== null) ? (float)$patch['compliance_pct'] : null;
+$pList    = $patch ? (json_decode((string)$patch['pending_json'], true) ?: []) : [];
+?>
+<section class="card">
+  <h3>Patch status<?php if ($patch): ?> <small class="muted">scanned <?= e(time_ago($patch['last_scan_at'])) ?></small><?php endif; ?></h3>
+  <?php if (!patch_enabled()): ?>
+    <p class="muted">Patch management is off. Enable it in <code>config.php</code> (<code>patch.enabled</code>) to collect Windows Update status.</p>
+  <?php elseif (!$patch): ?>
+    <p class="muted">No scan reported yet — a patch-capable agent (v1.2.0+) reports within a minute of check-in.</p>
+  <?php else: ?>
+    <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center">
+      <span class="pill"><b><?= $pPending === 0 ? 'Up to date' : $pPending . ' pending' ?></b></span>
+      <?php if ($pCrit > 0): ?><span class="tag tag-sev-critical"><?= $pCrit ?> critical/security</span><?php endif; ?>
+      <?php if ($pReboot): ?><span class="tag tag-sev-warning">reboot pending</span><?php endif; ?>
+      <?php if ($pComp !== null): ?><span class="pill">compliance <b><?= e(rtrim(rtrim(number_format($pComp, 1), '0'), '.')) ?>%</b></span><?php endif; ?>
+    </div>
+    <?php if ($pList): ?>
+      <table class="grid mini" style="margin-top:14px">
+        <thead><tr><th>Update</th><th>KB</th><th>Classification</th><th>Severity</th></tr></thead>
+        <tbody>
+        <?php foreach (array_slice($pList, 0, 100) as $u): ?>
+          <tr>
+            <td><?= e((string)($u['title'] ?? '')) ?></td>
+            <td class="muted"><?= e((string)($u['kb'] ?? '')) ?></td>
+            <td class="muted small"><?= e((string)($u['classification'] ?? '')) ?></td>
+            <td class="muted small"><?= e((string)($u['severity'] ?? '')) ?></td>
+          </tr>
+        <?php endforeach; ?>
+        </tbody>
+      </table>
+    <?php endif; ?>
+  <?php endif; ?>
 </section>
 
 <div class="cols">

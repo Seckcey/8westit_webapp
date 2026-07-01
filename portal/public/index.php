@@ -2,6 +2,7 @@
 declare(strict_types=1);
 require_once __DIR__ . '/../lib/render.php';
 require_once __DIR__ . '/../lib/realtime.php';
+require_once __DIR__ . '/../lib/patch.php';
 enforce_https();
 $user = require_login();
 
@@ -31,9 +32,11 @@ foreach ($rows as $r) if (row_online($r, $live)) $online++;
 
 // Group: client -> site -> [agents]. Precompute _online onto each row so agent_row()
 // can read it without changing its signature.
+$patchFleet = patch_fleet();   // Phase 3: agent_id => latest patch status (empty if feature off / no scans)
 $groups = [];
 foreach ($rows as $r) {
     $r['_online'] = row_online($r, $live);
+    $r['_patch']  = $patchFleet[(int)$r['id']] ?? null;
     $cn = $r['client_name'] ?? 'Unassigned';
     $site = (string)($r['site'] ?? '');
     if (!isset($groups[$cn])) $groups[$cn] = ['online' => 0, 'total' => 0, 'sites' => []];
@@ -47,7 +50,16 @@ function agent_row(array $r): void {
     $on = $r['_online'] ?? agent_is_online($r); ?>
     <tr>
       <td><span class="dot <?= $on ? 'dot-on' : 'dot-off' ?>"></span></td>
-      <td><a href="agent.php?id=<?= (int)$r['id'] ?>"><?= e($r['display_name'] ?: $r['hostname']) ?></a></td>
+      <td><a href="agent.php?id=<?= (int)$r['id'] ?>"><?= e($r['display_name'] ?: $r['hostname']) ?></a><?php
+        $p = $r['_patch'] ?? null;
+        if ($p) {
+            $pc = (int)$p['pending_count']; $cc = (int)$p['critical_count'];
+            if ($cc > 0)                            echo ' <span class="tag tag-sev-critical" title="' . $cc . ' critical/security updates pending">' . $cc . '</span>';
+            elseif ($pc > 0)                         echo ' <span class="tag tag-sev-warning" title="' . $pc . ' updates pending">' . $pc . '</span>';
+            elseif ((int)$p['reboot_pending'] === 1) echo ' <span class="tag tag-sev-warning" title="reboot pending">reboot</span>';
+            else                                     echo ' <span class="tag tag-st-resolved" title="up to date">&#10003;</span>';
+        }
+      ?></td>
       <td><?= e($r['last_user'] ?: '—') ?></td>
       <td><?= e($r['os_name']) ?></td>
       <td><?php foreach (array_filter(array_map('trim', explode(',', (string)($r['tags'] ?? '')))) as $t): ?><span class="tag"><?= e($t) ?></span> <?php endforeach; ?></td>

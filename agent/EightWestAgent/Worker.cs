@@ -32,7 +32,7 @@ namespace EightWest.Agent
                     return v.Major + "." + v.Minor + "." + (v.Build < 0 ? 0 : v.Build);
             }
             catch { /* fall through to the literal */ }
-            return "1.1.9";
+            return "1.2.0";
         }
 
         private readonly ManualResetEvent _stop = new ManualResetEvent(false);
@@ -46,6 +46,11 @@ namespace EightWest.Agent
         private int _heartbeatSecs = 60;
         private DateTime _lastInventory = DateTime.MinValue;
         private DateTime _lastSelfHealCheck = DateTime.MinValue;
+
+        // --- Patch management (Phase 3) --- advertised by the heartbeat "patch" directive.
+        private DateTime _lastPatchScan = DateTime.MinValue;
+        private bool _patchEnabled = false;
+        private int _patchIntervalHours = 8;
         private bool _rustConfigured = false;
         private DateTime _lastRustAttempt = DateTime.MinValue;
 
@@ -323,6 +328,12 @@ namespace EightWest.Agent
 
                     if ((DateTime.UtcNow - _lastInventory).TotalHours >= 6) SendInventory();
 
+                    // Patch scan (Phase 3): when the portal advertises patch management, scan
+                    // Windows Update on startup + every configured interval and report. Runs
+                    // synchronously like inventory (infrequent; a few seconds to ~a minute).
+                    if (_patchEnabled && (DateTime.UtcNow - _lastPatchScan).TotalHours >= _patchIntervalHours)
+                        SendPatchScan();
+
                     // Install + configure RustDesk in the background, retrying every 10 min
                     // until it's ready (first run downloads + silently installs it).
                     if (!_rustConfigured && (DateTime.UtcNow - _lastRustAttempt).TotalMinutes >= 10)
@@ -367,6 +378,12 @@ namespace EightWest.Agent
             // The portal advertises the "update" directive on heartbeat too. Overwrite each
             // cycle (null when absent), so a no-update heartbeat clears any prior directive.
             _pendingUpdate = resp.ContainsKey("update") ? resp["update"] as Dictionary<string, object> : null;
+
+            // Phase 3: a "patch" directive present => patch management is enabled; the agent runs
+            // Windows Update scans on its own timer. Absent (feature off / old portal) => no scans.
+            var patch = resp.ContainsKey("patch") ? resp["patch"] as Dictionary<string, object> : null;
+            _patchEnabled = patch != null && patch.ContainsKey("enabled") && Convert.ToBoolean(patch["enabled"]);
+            if (patch != null) _patchIntervalHours = Math.Max(1, (int)Num(patch, "interval_hours", 8));
 
             return (int)Num(resp, "pending_jobs", 0);
         }
@@ -442,6 +459,17 @@ namespace EightWest.Agent
                 Log.Info("Inventory uploaded.");
             }
             catch (Exception ex) { Log.Warn("Inventory upload failed: " + ex.Message); }
+        }
+
+        private void SendPatchScan()
+        {
+            try
+            {
+                _api.Post("/api/patch_report.php", PatchManager.Scan());
+                _lastPatchScan = DateTime.UtcNow;
+                Log.Info("Patch scan reported.");
+            }
+            catch (Exception ex) { Log.Warn("Patch scan/report failed: " + ex.Message); }
         }
 
         /// <summary>

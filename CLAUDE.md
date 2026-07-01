@@ -103,6 +103,13 @@ Tagline: *"Every endpoint, every mile."* Live in production. **This GitHub repo 
   alerting for matching devices (gated in `alerts_evaluate` + offline sweep + held in the dispatch cron); managed on the
   Alerts page. Webhooks in `config.php` `alerts.webhooks` (slack/discord/telegram/generic, https-only) sent by the cron via
   `lib/webhook.php` alongside email. DEPLOY = import migration → upload changed portal files → (optional) add `alerts.webhooks`.
-- Roadmap doc: `8 West IT/Milepost-Product-Roadmap.docx` (9 phases). After Step 3: **Phase 3 = patch management**
-  (ring rollout + rollback).
+- **Phase 3 (patch management) — MVP "scan & report" BUILT + tested, NOT yet deployed (2026-07-02).** Windows-Update-direct
+  patch VISIBILITY only (no installs yet). **Agent 1.2.0** `PatchManager` shells a WUA COM PowerShell scan (`IsInstalled=0`)
+  on startup + a timer, POSTs to `api/patch_report.php`, gated by a heartbeat `patch` directive that appears only when
+  `config.php` `patch.enabled` is on. Portal: `agent_patch_status` table (migration `2026-07-02_phase3_patch.sql`),
+  `lib/patch.php`, a Patch card on `agent.php`, a fleet badge on `index.php`. Chosen rollback approach (built later) =
+  best-effort per-KB DISM/wusa uninstall + honest "not reversible" flags. DEPLOY = import migration → upload portal files →
+  build+ship the 1.2.0 agent templates → flip `patch.enabled` → canary DESKTOP-UNAR4O1. **Next increments: (2) install +
+  ring rollout (`patch_settings` policy key + rollout cron + maintenance-window install gate); (3) rollback + auto-halt.**
+- Roadmap doc: `8 West IT/Milepost-Product-Roadmap.docx` (9 phases). Phase 3 = patch management (ring rollout + rollback).
 - Deep project history, deploy specifics, and lessons live in the Claude memory files (`8west-rmm-project.md`).

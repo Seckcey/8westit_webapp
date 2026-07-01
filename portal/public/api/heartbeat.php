@@ -10,6 +10,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../../lib/auth.php';
 require_once __DIR__ . '/../../lib/realtime.php';
 require_once __DIR__ . '/../../lib/update.php';
+require_once __DIR__ . '/../../lib/patch.php';
 enforce_https();
 
 if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') json_err('POST required', 405);
@@ -53,5 +54,11 @@ $upd = resolve_agent_update([
     'target_version' => $agent['target_version'] ?? null,
 ]);
 if ($upd !== null) $resp['update'] = $upd;
+
+// Patch management directive (Phase 3, off by default). Its presence tells the agent to run
+// Windows Update scans on its own timer; absent = don't scan. Old agents ignore this unknown key.
+if (patch_enabled()) {
+    $resp['patch'] = ['enabled' => true, 'interval_hours' => patch_scan_interval_hours()];
+}
 
 json_out($resp);

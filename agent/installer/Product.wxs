@@ -27,7 +27,7 @@
 
   <Package Name="Milepost Agent"
            Manufacturer="8 West IT, LLC"
-           Version="1.1.9.0"
+           Version="1.2.0.0"
            UpgradeCode="7B3F2A14-9C6E-4D2B-AE51-8F0C2D6A1E90"
            Compressed="yes"
            Scope="perMachine">
