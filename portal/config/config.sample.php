@@ -135,4 +135,13 @@ return [
             // ['type' => 'generic',  'url'   => 'https://example.com/milepost-hook'],
         ],
     ],
+
+    // --- Patch management (Phase 3) ---
+    // HARD KILL-SWITCH — DEFAULT OFF. While false, supporting agents do NOT scan/report and the
+    // portal shows no patch data. The MVP is scan-and-report only (Windows Update, no installs yet).
+    // Flip on, then patch visibility populates as scanning-capable agents report in.
+    'patch' => [
+        'enabled'             => false,  // master gate
+        'scan_interval_hours' => 8,      // how often a supporting agent runs a Windows Update scan
+    ],
 ];
