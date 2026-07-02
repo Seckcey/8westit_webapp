@@ -214,8 +214,20 @@ Tagline: *"Every endpoint, every mile."* Live in production. **This GitHub repo 
   CRUD/run assertions** (create/list/update+version-bump/dup-name-reject/empty-body-reject/run-creates-job-w-right-type+
   payload+agent/run_count++) + automation.php admin-save (count 1→2) + tech 403-blocked (stayed 2) + agent.php run_script
   admin (job created) + tech-blocked + render (Script library + saved script visible). Runs are POLL-queued (≤ heartbeat
-  latency), single-device — RT-immediate + multi-device/scoped run are future polish. **NEXT increments: (2) scheduled
-  scripts; (3) event-driven automations (alert→action) + self-healing playbooks (reuse `tool_actions` scaffolding +
-  Phase-2 alert events); (4) AI-assisted scripting.**
+  latency), single-device — RT-immediate + multi-device/scoped run are future polish.
+  **Increment 2 = scheduled scripts: BUILT + tested, NOT deployed.** Migration `2026-07-03_phase4_scripts_schedules.sql`
+  (`script_schedules`: script_id FK/scope(global/client/site/group/device)/recurrence ENUM('interval','daily','weekly')/
+  at_time(UTC)/dow/interval_min/is_enabled/last_run_at; FKs `fk_sched_script`,`fk_sched_user`). `lib/scripts.php` +=
+  `schedules_list`/`schedule_scope_agents`/`schedule_is_due` (interval since last_run; daily/weekly once/day when now
+  passes at_time, weekly gated on dow; single catch-up if the cron was down)/`schedule_save`/`schedule_delete`/
+  `schedule_set_enabled`, and `script_run_on_agent` now takes `?int $uid` (null = system run). New 1-min CLI cron
+  **`cron/script_dispatch.php`** fires each enabled due schedule → one job per in-scope agent → stamps last_run_at. A
+  Schedules card on `automation.php` (list + admin CRUD + on/off toggle; JS scope-target picker + recurrence field
+  toggle). **MIGRATION-ORDER LESSON: name FK-child migrations so they sort AFTER the parent table** — `_script_schedules`
+  sorted BEFORE `_scripts` (`_`<`s`) so the FK failed; renamed to `_scripts_schedules` (`.`<`_` puts `scripts.sql`
+  first). VERIFIED: 12 unit asserts (is_due interval/daily/weekly due+not-due, save, scope, reject-missing-script) + cron
+  fired a due schedule (1 job, last_run set) then did NOT re-fire + automation.php admin save & tech-block + render.
+  DEPLOY adds a cPanel cron `* * * * * …/cron/script_dispatch.php`. **NEXT: (3) event-driven automations (alert→action) +
+  self-healing playbooks (reuse `tool_actions` scaffolding + Phase-2 alert events); (4) AI-assisted scripting.**
 - Roadmap doc: `8 West IT/Milepost-Product-Roadmap.docx` (9 phases). Phase 3 = patch management (ring rollout + rollback).
 - Deep project history, deploy specifics, and lessons live in the Claude memory files (`8west-rmm-project.md`).
