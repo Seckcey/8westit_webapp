@@ -227,7 +227,22 @@ Tagline: *"Every endpoint, every mile."* Live in production. **This GitHub repo 
   sorted BEFORE `_scripts` (`_`<`s`) so the FK failed; renamed to `_scripts_schedules` (`.`<`_` puts `scripts.sql`
   first). VERIFIED: 12 unit asserts (is_due interval/daily/weekly due+not-due, save, scope, reject-missing-script) + cron
   fired a due schedule (1 job, last_run set) then did NOT re-fire + automation.php admin save & tech-block + render.
-  DEPLOY adds a cPanel cron `* * * * * …/cron/script_dispatch.php`. **NEXT: (3) event-driven automations (alert→action) +
-  self-healing playbooks (reuse `tool_actions` scaffolding + Phase-2 alert events); (4) AI-assisted scripting.**
+  DEPLOY adds a cPanel cron `* * * * * …/cron/script_dispatch.php`.
+  **Increment 3 = event-driven automations + self-healing playbooks: BUILT + tested, NOT deployed.** Migration
+  `2026-07-03_phase4_scripts_automations.sql` (`automations`: match_rule[substring on alert.rule_key]/match_severity/
+  scope/script_id[action]/cooldown_min/max_per_day/is_enabled; `automation_runs`: automation_id/alert_id[BIGINT]/agent_id/
+  job_id + `uq_autorun(automation_id,alert_id)` = fire-once-per-alert; FKs fk_autom_*/fk_autorun_*). `lib/automation.php` =
+  `automation_enabled()` (config `automation.enabled`, DEFAULT-OFF master kill-switch), CRUD, `automation_matches($a,$alert)`
+  (rule substring + severity + the alert agent's scope), `automation_playbook_templates()` (3 ready self-heal scripts:
+  clear temp / flush DNS / restart Spooler). New 1-min CLI cron **`cron/automation_run.php`** (gated by automation_enabled;
+  scans OPEN alerts [last 24h] × enabled automations → fires the script on the alerting device; guardrails: once-per-alert
+  via uq_autorun, per-agent cooldown, per-automation daily cap). `automation.php` gains an **Automations card** (admin CRUD
+  + on/off + gate-off notice) and a **Self-healing playbooks card** (one-click "Add to library" → script_save).
+  `config.sample.php` gained the `automation` block. VERIFIED: migration clean; ~20 asserts — matcher 6 + engine
+  end-to-end (fired on a disk alert, daily-cap stop, dedupe on re-run, cooldown blocked a 2nd alert, master-gate-off
+  no-op) + playbook_add + admin save + tech-blocked + render. **Phase 4 core (script library → scheduled → event-driven/
+  self-healing) is now feature-complete on branch `phase-4-automation`. Remaining: (4) AI-assisted scripting (Phase-9 AI
+  track).** DEPLOY of the whole Phase-4 branch = merge → import the phase-4 migrations in filename order → upload portal
+  files → add the `script_dispatch.php` + `automation_run.php` crons → (optionally, last) flip `automation.enabled`.
 - Roadmap doc: `8 West IT/Milepost-Product-Roadmap.docx` (9 phases). Phase 3 = patch management (ring rollout + rollback).
 - Deep project history, deploy specifics, and lessons live in the Claude memory files (`8west-rmm-project.md`).
