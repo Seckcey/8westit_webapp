@@ -154,4 +154,13 @@ return [
         'enabled'             => false,  // master gate
         'scan_interval_hours' => 12,     // how often a supporting agent runs `winget upgrade`
     ],
+
+    // --- Automation & self-healing (Phase 4) ---
+    // HARD KILL-SWITCH — DEFAULT OFF. While false, cron/automation_run.php does nothing: an OPEN alert
+    // never auto-runs a script. Turn on ONLY after you've reviewed your automations (they run scripts
+    // as SYSTEM on the alerting device). Per-automation is_enabled + cooldown + daily-cap add further
+    // guardrails. Add the 1-min cron: * * * * * …/cron/automation_run.php
+    'automation' => [
+        'enabled' => false,  // master gate for event-driven automations / self-healing
+    ],
 ];

@@ -25,3 +25,5 @@ agent/installer/rustdesk-*.exe
 
 # Generated installer templates (built by build-templates.ps1, uploaded to the portal)
 portal/installers/*.msi
+Milepost-Product-Roadmap.pdf
+milepost.code-workspace

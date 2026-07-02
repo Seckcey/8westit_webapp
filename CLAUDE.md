@@ -199,5 +199,50 @@ Tagline: *"Every endpoint, every mile."* Live in production. **This GitHub repo 
   render/admin-save + tech-blocked. DEPLOY (portal-only) = import the 3 migrations (`…_winget_rollout`,
   `…_software_licenses`; the winget_rollout one ALTERs patch_rollout_targets) → upload changed portal files (cron/patch_rollout.php,
   lib/patch.php, lib/render.php, lib/software.php, public/patches.php, public/patches_action.php, public/software.php).
+- **Phase 4 (Automation & Self-Healing) — STARTED on branch `phase-4-automation` (2026-07-03). NOTE: built on a git
+  BRANCH (not main) — the user chose to "fork" for Phase 4 (feature branch off main; merge when stable). Phase 4 was
+  chosen over Phase 5 after confirming Phase 4 was NOT already done (only groundwork existed: the jobs framework +
+  unused `tool_actions`/`tool_invocations` tables + Phase-2 alert events; `agent/SelfHeal.cs` is agent-BINARY self-heal,
+  NOT endpoint self-healing playbooks).** **Increment 1 = Script Library: BUILT + tested, NOT deployed.** Migration
+  `2026-07-03_phase4_scripts.sql` (`scripts` table: name[unique]/description/language ENUM('powershell','cmd')/body/
+  version/run_count/created_by; FK `fk_scripts_user`). `lib/scripts.php` = list/get/`script_save` (create or update with
+  version++ + duplicate-name guard via uq_scripts_name catch + empty-body guard) / delete / `script_run_on_agent` (enqueue
+  a job with the script's `language` as `job_type` + `body` as `payload`, run_count++ — reuses the existing agent
+  JobRunner). New admin-only **`automation.php`** page (Script library card: table + CRUD editor w/ body textarea) + an
+  **"Automation" nav link** in `render.php` (after Software). `agent.php` gains a "Run saved script" card (admin-only,
+  `run_script` action → `script_run_on_agent`). VERIFIED (MariaDB 3307, temp config deleted): migration clean; **9
+  CRUD/run assertions** (create/list/update+version-bump/dup-name-reject/empty-body-reject/run-creates-job-w-right-type+
+  payload+agent/run_count++) + automation.php admin-save (count 1→2) + tech 403-blocked (stayed 2) + agent.php run_script
+  admin (job created) + tech-blocked + render (Script library + saved script visible). Runs are POLL-queued (≤ heartbeat
+  latency), single-device — RT-immediate + multi-device/scoped run are future polish.
+  **Increment 2 = scheduled scripts: BUILT + tested, NOT deployed.** Migration `2026-07-03_phase4_scripts_schedules.sql`
+  (`script_schedules`: script_id FK/scope(global/client/site/group/device)/recurrence ENUM('interval','daily','weekly')/
+  at_time(UTC)/dow/interval_min/is_enabled/last_run_at; FKs `fk_sched_script`,`fk_sched_user`). `lib/scripts.php` +=
+  `schedules_list`/`schedule_scope_agents`/`schedule_is_due` (interval since last_run; daily/weekly once/day when now
+  passes at_time, weekly gated on dow; single catch-up if the cron was down)/`schedule_save`/`schedule_delete`/
+  `schedule_set_enabled`, and `script_run_on_agent` now takes `?int $uid` (null = system run). New 1-min CLI cron
+  **`cron/script_dispatch.php`** fires each enabled due schedule → one job per in-scope agent → stamps last_run_at. A
+  Schedules card on `automation.php` (list + admin CRUD + on/off toggle; JS scope-target picker + recurrence field
+  toggle). **MIGRATION-ORDER LESSON: name FK-child migrations so they sort AFTER the parent table** — `_script_schedules`
+  sorted BEFORE `_scripts` (`_`<`s`) so the FK failed; renamed to `_scripts_schedules` (`.`<`_` puts `scripts.sql`
+  first). VERIFIED: 12 unit asserts (is_due interval/daily/weekly due+not-due, save, scope, reject-missing-script) + cron
+  fired a due schedule (1 job, last_run set) then did NOT re-fire + automation.php admin save & tech-block + render.
+  DEPLOY adds a cPanel cron `* * * * * …/cron/script_dispatch.php`.
+  **Increment 3 = event-driven automations + self-healing playbooks: BUILT + tested, NOT deployed.** Migration
+  `2026-07-03_phase4_scripts_automations.sql` (`automations`: match_rule[substring on alert.rule_key]/match_severity/
+  scope/script_id[action]/cooldown_min/max_per_day/is_enabled; `automation_runs`: automation_id/alert_id[BIGINT]/agent_id/
+  job_id + `uq_autorun(automation_id,alert_id)` = fire-once-per-alert; FKs fk_autom_*/fk_autorun_*). `lib/automation.php` =
+  `automation_enabled()` (config `automation.enabled`, DEFAULT-OFF master kill-switch), CRUD, `automation_matches($a,$alert)`
+  (rule substring + severity + the alert agent's scope), `automation_playbook_templates()` (3 ready self-heal scripts:
+  clear temp / flush DNS / restart Spooler). New 1-min CLI cron **`cron/automation_run.php`** (gated by automation_enabled;
+  scans OPEN alerts [last 24h] × enabled automations → fires the script on the alerting device; guardrails: once-per-alert
+  via uq_autorun, per-agent cooldown, per-automation daily cap). `automation.php` gains an **Automations card** (admin CRUD
+  + on/off + gate-off notice) and a **Self-healing playbooks card** (one-click "Add to library" → script_save).
+  `config.sample.php` gained the `automation` block. VERIFIED: migration clean; ~20 asserts — matcher 6 + engine
+  end-to-end (fired on a disk alert, daily-cap stop, dedupe on re-run, cooldown blocked a 2nd alert, master-gate-off
+  no-op) + playbook_add + admin save + tech-blocked + render. **Phase 4 core (script library → scheduled → event-driven/
+  self-healing) is now feature-complete on branch `phase-4-automation`. Remaining: (4) AI-assisted scripting (Phase-9 AI
+  track).** DEPLOY of the whole Phase-4 branch = merge → import the phase-4 migrations in filename order → upload portal
+  files → add the `script_dispatch.php` + `automation_run.php` crons → (optionally, last) flip `automation.enabled`.
 - Roadmap doc: `8 West IT/Milepost-Product-Roadmap.docx` (9 phases). Phase 3 = patch management (ring rollout + rollback).
 - Deep project history, deploy specifics, and lessons live in the Claude memory files (`8west-rmm-project.md`).
