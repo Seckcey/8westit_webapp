@@ -244,5 +244,12 @@ Tagline: *"Every endpoint, every mile."* Live in production. **This GitHub repo 
   self-healing) is now feature-complete on branch `phase-4-automation`. Remaining: (4) AI-assisted scripting (Phase-9 AI
   track).** DEPLOY of the whole Phase-4 branch = merge → import the phase-4 migrations in filename order → upload portal
   files → add the `script_dispatch.php` + `automation_run.php` crons → (optionally, last) flip `automation.enabled`.
+- **DEPLOYED + LIVE (2026-07-03):** the Phase 3 fast-follows (winget-in-rollout + patch-compliance report + software
+  inventory/license tracking) AND Phase 4 core (script library → scheduled scripts → event-driven automations +
+  self-healing playbooks) are on production — the **Automation** and **Software** nav links are confirmed live/working
+  (so the 5 migrations imported + portal files uploaded). `main` @ merge `b86be17`. The **`config.php automation.enabled`
+  master switch stays OFF** until automations are reviewed (nothing auto-runs a script until it's flipped on). Phase 4 was
+  built on branch `phase-4-automation` (kept as a backup, fully merged into main). Remaining Phase 4: (4) AI-assisted
+  scripting (Phase-9 AI track).
 - Roadmap doc: `8 West IT/Milepost-Product-Roadmap.docx` (9 phases). Phase 3 = patch management (ring rollout + rollback).
 - Deep project history, deploy specifics, and lessons live in the Claude memory files (`8west-rmm-project.md`).
