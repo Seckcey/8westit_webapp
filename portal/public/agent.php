@@ -5,6 +5,7 @@ require_once __DIR__ . '/../lib/realtime.php';
 require_once __DIR__ . '/../lib/update.php';
 require_once __DIR__ . '/../lib/patch.php';
 require_once __DIR__ . '/../lib/winget.php';
+require_once __DIR__ . '/../lib/scripts.php';
 enforce_https();
 $user = require_login();
 
@@ -70,6 +71,16 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
                 audit((int)$user['id'], $id, 'queue_job', "type=$type via=poll");
                 $flash = 'Command queued. It will run on the next agent check-in.';
             }
+        }
+    } elseif ($action === 'run_script') {
+        // Run a saved library script on this device (DESTRUCTIVE → admin-only; the click is the approval).
+        if (($user['role'] ?? '') !== 'admin') {
+            $flash = 'Only admins can run scripts.';
+        } else {
+            $sid = (int)($_POST['script_id'] ?? 0);
+            $jid = $sid > 0 ? script_run_on_agent($sid, $id, (int)$user['id']) : 0;
+            if ($jid > 0) { audit((int)$user['id'], $id, 'run_script', "script#$sid job#$jid"); $flash = 'Script queued — it runs on the next agent check-in.'; }
+            else { $flash = 'Pick a script to run.'; }
         }
     } elseif ($action === 'update_agent') {
         $name = mb_substr(trim((string)($_POST['display_name'] ?? '')), 0, 128);
@@ -539,6 +550,25 @@ $wgList = $wg ? (json_decode((string)$wg['apps_json'], true) ?: []) : [];
       <p class="muted small">Runs as SYSTEM on the agent's next check-in (≤ <?= (int)$agent['heartbeat_secs'] ?>s).</p>
     </form>
   </section>
+
+  <?php if (($user['role'] ?? '') === 'admin' && ($scriptList = scripts_list())): ?>
+  <section class="card">
+    <h3>Run saved script</h3>
+    <form method="post">
+      <input type="hidden" name="csrf" value="<?= e($csrf) ?>">
+      <input type="hidden" name="action" value="run_script">
+      <label>Script
+        <select name="script_id">
+          <?php foreach ($scriptList as $s): ?>
+            <option value="<?= (int)$s['id'] ?>"><?= e($s['name']) ?> (<?= e($s['language']) ?>)</option>
+          <?php endforeach; ?>
+        </select>
+      </label>
+      <button class="btn-primary" onclick="return confirm('Run this saved script on this device now?');">Run script</button>
+      <p class="muted small">Runs on the next check-in. Manage scripts under <a href="automation.php">Automation</a>.</p>
+    </form>
+  </section>
+  <?php endif; ?>
 </div>
 
 <section class="card">

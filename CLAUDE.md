@@ -199,5 +199,23 @@ Tagline: *"Every endpoint, every mile."* Live in production. **This GitHub repo 
   render/admin-save + tech-blocked. DEPLOY (portal-only) = import the 3 migrations (`…_winget_rollout`,
   `…_software_licenses`; the winget_rollout one ALTERs patch_rollout_targets) → upload changed portal files (cron/patch_rollout.php,
   lib/patch.php, lib/render.php, lib/software.php, public/patches.php, public/patches_action.php, public/software.php).
+- **Phase 4 (Automation & Self-Healing) — STARTED on branch `phase-4-automation` (2026-07-03). NOTE: built on a git
+  BRANCH (not main) — the user chose to "fork" for Phase 4 (feature branch off main; merge when stable). Phase 4 was
+  chosen over Phase 5 after confirming Phase 4 was NOT already done (only groundwork existed: the jobs framework +
+  unused `tool_actions`/`tool_invocations` tables + Phase-2 alert events; `agent/SelfHeal.cs` is agent-BINARY self-heal,
+  NOT endpoint self-healing playbooks).** **Increment 1 = Script Library: BUILT + tested, NOT deployed.** Migration
+  `2026-07-03_phase4_scripts.sql` (`scripts` table: name[unique]/description/language ENUM('powershell','cmd')/body/
+  version/run_count/created_by; FK `fk_scripts_user`). `lib/scripts.php` = list/get/`script_save` (create or update with
+  version++ + duplicate-name guard via uq_scripts_name catch + empty-body guard) / delete / `script_run_on_agent` (enqueue
+  a job with the script's `language` as `job_type` + `body` as `payload`, run_count++ — reuses the existing agent
+  JobRunner). New admin-only **`automation.php`** page (Script library card: table + CRUD editor w/ body textarea) + an
+  **"Automation" nav link** in `render.php` (after Software). `agent.php` gains a "Run saved script" card (admin-only,
+  `run_script` action → `script_run_on_agent`). VERIFIED (MariaDB 3307, temp config deleted): migration clean; **9
+  CRUD/run assertions** (create/list/update+version-bump/dup-name-reject/empty-body-reject/run-creates-job-w-right-type+
+  payload+agent/run_count++) + automation.php admin-save (count 1→2) + tech 403-blocked (stayed 2) + agent.php run_script
+  admin (job created) + tech-blocked + render (Script library + saved script visible). Runs are POLL-queued (≤ heartbeat
+  latency), single-device — RT-immediate + multi-device/scoped run are future polish. **NEXT increments: (2) scheduled
+  scripts; (3) event-driven automations (alert→action) + self-healing playbooks (reuse `tool_actions` scaffolding +
+  Phase-2 alert events); (4) AI-assisted scripting.**
 - Roadmap doc: `8 West IT/Milepost-Product-Roadmap.docx` (9 phases). Phase 3 = patch management (ring rollout + rollback).
 - Deep project history, deploy specifics, and lessons live in the Claude memory files (`8west-rmm-project.md`).
